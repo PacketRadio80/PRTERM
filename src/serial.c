@@ -168,18 +168,32 @@ int pr_serial_open(pr_serial *s, const char *dev,
 
     /*
      * Modemleitungen. Wichtig fuer TNC2C-Klone: ohne DTR/RTS bleibt der
-     * TNC in einem Zustand aus dem er nicht sauber antwortet.
+     * TNC in einem Zustand, aus dem er nicht antwortet.
      *
-     * Auf PTYs kann TIOCMGET fehlschlagen - dann still ueberspringen,
-     * dort gibt es keine UART-Modemleitungen.
+     * WICHTIG: gesetzt wird mit TIOCMBIS (Bits setzen) - das geht OHNE
+     * vorheriges Lesen. Ein frueherer Entwurf hat zuerst TIOCMGET
+     * aufgerufen und bei Fehlschlag das Setzen still uebersprungen; auf
+     * diesem Port ist TIOCMGET nicht verfuegbar, dadurch lagen die
+     * Leitungen nie an und das TNC antwortete nicht.
      */
     if (rts_dtr) {
+#if defined(TIOCMBIS)
+        int bits = TIOCM_RTS | TIOCM_DTR;
+        (void)ioctl(fd, TIOCMBIS, &bits);
+#elif defined(TIOCMSET)
+        int lines = TIOCM_RTS | TIOCM_DTR;
+        (void)ioctl(fd, TIOCMSET, &lines);
+#endif
+        /*
+         * Zusatzversuch ueber den Les-Schreib-Weg. Wenn er fehlschlaegt,
+         * ist das nicht fatal - TIOCMBIS hat die Arbeit bereits erledigt.
+         */
 #ifdef TIOCMGET
-        int lines = 0;
-        if (ioctl(fd, TIOCMGET, &lines) == 0) {
-            lines |= TIOCM_RTS | TIOCM_DTR;
-            if (ioctl(fd, TIOCMSET, &lines) != 0) {
-                /* nicht fatal: manche Umgebungen lassen das nicht zu */
+        {
+            int cur = 0;
+            if (ioctl(fd, TIOCMGET, &cur) == 0) {
+                cur |= TIOCM_RTS | TIOCM_DTR;
+                (void)ioctl(fd, TIOCMSET, &cur);
             }
         }
 #endif
@@ -318,6 +332,67 @@ int pr_serial_flush(pr_serial *s, bool input, bool output)
     else                      sel = TCOFLUSH;
 
     return tcflush(s->fd, sel) == 0 ? 0 : -1;
+}
+
+int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
+                          int parity, int stopbits, char *err, size_t errlen)
+{
+    if (!pr_serial_ok(s)) {
+        snprintf(err, errlen, "Schnittstelle nicht offen");
+        return -1;
+    }
+
+    speed_t sp;
+    if (baud_to_flag(baud, &sp) != 0) {
+        snprintf(err, errlen, "Baudrate %ld wird nicht unterstuetzt", baud);
+        return -1;
+    }
+
+    struct termios t;
+    if (tcgetattr(s->fd, &t) != 0) {
+        snprintf(err, errlen, "tcgetattr: %s", strerror(errno));
+        return -1;
+    }
+
+    t.c_cflag &= ~(unsigned)(CSIZE | PARENB | PARODD | CSTOPB);
+    t.c_cflag |= (unsigned)(CLOCAL | CREAD);
+    t.c_cflag |= (unsigned)(databits == 7 ? CS7 : CS8);
+    if (parity == PR_PAR_EVEN)      t.c_cflag |= (unsigned)PARENB;
+    else if (parity == PR_PAR_ODD)  t.c_cflag |= (unsigned)(PARENB | PARODD);
+    if (stopbits == 2)              t.c_cflag |= (unsigned)CSTOPB;
+
+    if (cfsetispeed(&t, sp) != 0 || cfsetospeed(&t, sp) != 0) {
+        snprintf(err, errlen, "Baudrate %ld nicht setzbar: %s", baud, strerror(errno));
+        return -1;
+    }
+    if (tcsetattr(s->fd, TCSANOW, &t) != 0) {
+        snprintf(err, errlen, "tcsetattr: %s", strerror(errno));
+        return -1;
+    }
+
+    s->baud = baud;
+    s->databits = databits;
+    s->parity = parity;
+    s->stopbits = stopbits;
+    return 0;
+}
+
+int pr_serial_hold_dtr(pr_serial *s, char *err, size_t errlen)
+{
+    if (!pr_serial_ok(s)) {
+        snprintf(err, errlen, "Schnittstelle nicht offen");
+        return -1;
+    }
+#if defined(TIOCMBIS)
+    {
+        int bits = TIOCM_RTS | TIOCM_DTR;
+        if (ioctl(s->fd, TIOCMBIS, &bits) != 0) {
+            snprintf(err, errlen, "DTR/RTS nicht setzbar: %s", strerror(errno));
+            return -1;
+        }
+    }
+#endif
+    return 0;
 }
 
 int pr_serial_modem_lines(pr_serial *s)

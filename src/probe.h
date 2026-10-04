@@ -1,10 +1,6 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * probe.h - TNC-Erkennung.
- *
- * Es gibt keine Baud-Unterhandlung am TNC: die Werte stehen in der INI und
- * werden offline ermittelt. Dieses Modul faehrt die ueblichen Profile ab
- * und bewertet die Antworten.
+ * probe.h - TNC-Erkennung und Boot-Abfang.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -24,51 +20,77 @@ typedef struct pr_probe_result {
     int  stopbits;
     int  score;
     bool responds;
-    bool echo_only;        /* TNC spiegelt nur - Echo ist noch an */
-    bool clean_link;       /* sauberes Echo ODER echte Antwort, kein Muell */
-    char banner[512];      /* Rohantwort zum Anschauen */
+    bool echo_only;        /* Geraet spiegelt nur - Echo war an */
+    bool banner;           /* Firmware-Banner erkannt */
+    bool clean_link;       /* Banner, Echo oder klare Antwort - kein Muell */
+    char answer[512];      /* echte Antwort nach Echo-Entfernung */
+    int  fd;               /* bei pr_probe_bootwait: OFFEN lassen! */
 } pr_probe_result;
 
 /* Fortschritt melden; Rueckgabe != 0 bricht ab. */
 typedef int (*pr_probe_cb)(void *ud, const char *msg);
 
 /*
- * Faeht die Profile gegen ein Geraet durch und liefert das beste.
+ * Faeht die Profile gegen ein Geraet durch.
+ *
+ * Der Port wird dabei GENAU EINMAL geoeffnet und bis zum Schluss offen
+ * gehalten - ein Schliessen laesst DTR fallen und versetzt einen TNC2C in
+ * einen Zustand ohne Antwort.
+ *
  * Rueckgabe 0 wenn mindestens ein Profil geantwortet hat.
  */
 int pr_probe_device(const char *dev, pr_probe_result *best,
                     pr_probe_cb progress, void *ud,
                     char *err, size_t errlen);
 
-/* Zeilenformat als Text, z.B. "19200 8N1". */
-void pr_probe_format(const pr_probe_result *r, char *dst, size_t dstlen);
+/*
+ * Faengt den Boot-Banner eines Geraets ab.
+ *
+ * Aufruf: Port oeffnen, DTR/RTS anlegen, DANN das Geraet einschalten und
+ * hier warten. Es wird nur gelesen, nichts gesendet.
+ *
+ * WICHTIG: bei Erfolg ist best->fd offen - NICHT schliessen, solange das
+ * Geraet weiter betrieben werden soll.
+ */
+int pr_probe_bootwait(const char *dev, long baud, int databits, int parity,
+                      int stopbits, int seconds,
+                      pr_probe_result *best, pr_probe_cb progress, void *ud,
+                      char *err, size_t errlen);
 
 /*
- * Fuehrt das Geraet in einen bekannten Zustand zurueck (KISS verlassen,
- * Hostmode verlassen). Das ist noetig, weil ein TNC im KISS- oder Hostmode
- * auf Textkommandos schlicht nicht antwortet.
+ * Fuehrt das Geraet in einen bekannten Zustand zurueck und liest die
+ * Antwort mit. Der Port bleibt dabei offen.
+ *
+ * Reihenfolge aus tnc_serial_recovery.py:
+ *
+ *   11 18                       Puffer leeren (^Q^X)
+ *   300 x 00 + JHOST 0          WA8DED-Hostmode verlassen
+ *   C0 FF C0                    KISS verlassen - bei TheFirmware zugleich
+ *                               FIRMWARE-RESET, der den Banner ausloest
+ *   ESC V                       Probe
+ *
+ * WICHTIG: die Antwort wird NICHT verworfen. Ein frueherer Entwurf hat am
+ * Ende gecleart und damit den ausgeloesten Boot-Banner weggeworfen.
+ *
+ * Liefert die Laenge der gelesenen Antwort.
  */
-void pr_probe_reset(pr_serial *s);
+size_t pr_probe_reset(pr_serial *s, unsigned char *out, size_t outcap);
 
-/* ---- Reine Bewertungsfunktionen ---------------------------------------
- * Bewusst oeffentlich, damit sie sich direkt testen lassen. Das
- * Echo-Stripping war zweimal falsch und hat sich im Betrieb bemerkbar
- * gemacht - genau dieses Verhalten gehoert in einen Test. */
+/* Zeilenformat als Text, z.B. "19200 7E1". */
+void pr_probe_format(const pr_probe_result *r, char *dst, size_t dstlen);
 
-/* Entfernt alle Vorkommen eines Musters; liefert die neue Laenge. */
+/* ---- Reine Bewertungsfunktionen --------------------------------------
+ * Bewusst oeffentlich, damit sie sich direkt testen lassen. */
+
 size_t pr_probe_remove_bytes(unsigned char *buf, size_t len,
                              const unsigned char *needle, size_t nlen);
-
-/* Entfernt die gesendeten Sondierungen aus der Antwort. */
 size_t pr_probe_strip_echo(unsigned char *buf, size_t len);
-
-/* Anteil druckbarer Zeichen - Muell liegt deutlich unter 1. */
 double pr_probe_printable_ratio(const unsigned char *buf, size_t len);
+bool   pr_probe_has_content(const unsigned char *buf, size_t len);
+int    pr_probe_score(const unsigned char *buf, size_t len);
 
-/* Bleibt nach Entfernen von Weissschraum und NUL etwas Substanzielles? */
-bool pr_probe_has_content(const unsigned char *buf, size_t len);
-
-/* Bewertet eine echte Antwort (ohne Echo). 0 bei Muell oder nichts. */
-int pr_probe_score(const unsigned char *buf, size_t len);
+/* Firmware-Marker erkennen - das ist das eigentliche Kriterium fuer
+ * "hier spricht ein TNC", unabhaengig von der Punktzahl. */
+bool   pr_probe_has_banner(const unsigned char *buf, size_t len);
 
 #endif /* PRTERM_PROBE_H */

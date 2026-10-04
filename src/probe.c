@@ -1,18 +1,25 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * probe.c - TNC-Erkennung ueber Profil-Sweep.
+ * probe.c - TNC-Erkennung und Boot-Abfang.
  *
- * Wichtige Erfahrungen aus dem Betrieb:
+ * Regeln, die aus dem Betrieb mit MAX25-Stack uebernommen sind und die
+ * Grundlage dieses Moduls bilden:
  *
- *   - Ein TNC im Command-Mode SPIEGELT die Eingabe, solange das Echo nicht
- *     ausgeschaltet ist. Ein Echo ist keine Antwort - es beweist aber, dass
- *     Port und Baudrate stimmen.
+ *   1. DEN PORT NICHT SCHLIESSEN. Ein fallendes DTR versetzt einen TNC2C
+ *      in einen Echo-only-Zustand, aus dem er nicht mehr antwortet.
+ *      Ein frueherer Entwurf hat nach jedem Profil geschlossen und damit
+ *      genau dieses Problem erzeugt.
  *
- *   - Die Rohantwort enthaelt NUL-Bytes. Alles was mit strstr/strlen
- *     arbeitet, haelt dort an. Deshalb wird hier byte-orientiert gearbeitet.
+ *   2. DTR/RTS waehrend des Einschaltens HOCH HALTEN. Wer das Geraet neu
+ *      startet, muss den Port bereits offen haben.
  *
- *   - Bei falscher Baudrate kommt Muell. Muell darf nicht punkten - sonst
- *     gewinnt ein zufaelliges Profil gegen ein sauberes Echo.
+ *   3. Der Probe heisst ESC V (1B 56 0D), nicht INFO oder HELP.
+ *
+ *   4. Nur LESENDE Kommandos in der Erkennung. "KISS" oder "MYCALL"
+ *      schalten das Geraet um.
+ *
+ *   5. Echo erkennen und entfernen. Ein TNC im Command-Mode spiegelt die
+ *      Eingabe; das ist keine Antwort.
  *
  * SPDX-License-Identifier: MIT
  */
@@ -39,39 +46,42 @@ typedef struct pr_profile {
 } pr_profile;
 
 /*
- * Reihenfolge bewusst: die in der Praxis bewaehrten Profile zuerst.
- *
- * Landolt TNC2C    - Handbuch sagt 7E1, in der Praxis laeuft er bei 19200 8N1
- * PK-TNC2          - 9600 8N1
- * TNC2-Klone allg. - 2400 7E1
- * T-Modem          - 115200 8N1
+ * Landolt TNC2C  : 19200, Handbuch 7E1 - im Feld bestaetigt
+ * PK-TNC2        : 9600 8N1
+ * TNC2-Klone     : 2400 7E1
+ * T-Modem        : 115200 8N1
  */
 static const pr_profile profiles[] = {
-    { 19200,  8, PR_PAR_NONE, 1, "TNC2C Praxis"    },
-    { 19200,  7, PR_PAR_EVEN, 1, "TNC2C Handbuch"  },
-    {  9600,  8, PR_PAR_NONE, 1, "PK-TNC2"         },
-    {  9600,  7, PR_PAR_EVEN, 1, "9600 7E1"        },
-    {  4800,  7, PR_PAR_EVEN, 1, "4800 7E1"        },
-    {  2400,  8, PR_PAR_NONE, 1, "2400 8N1"        },
-    {  2400,  7, PR_PAR_EVEN, 1, "2400 7E1"        },
-    {  1200,  7, PR_PAR_EVEN, 1, "1200 7E1"        },
-    { 115200, 8, PR_PAR_NONE, 1, "T-Modem"         },
+    { 19200,  7, PR_PAR_EVEN, 1, "TNC2C (Handbuch)" },
+    { 19200,  8, PR_PAR_NONE, 1, "TNC2C 8N1"        },
+    {  9600,  8, PR_PAR_NONE, 1, "PK-TNC2"          },
+    {  9600,  7, PR_PAR_EVEN, 1, "9600 7E1"         },
+    {  4800,  7, PR_PAR_EVEN, 1, "4800 7E1"         },
+    {  2400,  7, PR_PAR_EVEN, 1, "2400 7E1"         },
+    {  2400,  8, PR_PAR_NONE, 1, "2400 8N1"         },
+    {  1200,  7, PR_PAR_EVEN, 1, "1200 7E1"         },
+    { 115200, 8, PR_PAR_NONE, 1, "T-Modem"          },
 };
 
 #define PROFILE_COUNT (sizeof profiles / sizeof profiles[0])
 
 /*
- * Die gesendeten Sondierungen - fuer Echo-Erkennung und -Entfernung.
+ * Sondierungen - ausschliesslich LESEND.
  *
- * WICHTIG: nur LESENDE Kommandos. Zustandsaendernde wie "KISS" oder
- * "MYCALL <x>" duerfen hier nicht stehen - eine Erkennung darf das Geraet
- * nicht umschalten. Ein frueherer Entwurf hat "KISS\r" mitgesendet und das
- * TNC damit in den KISS-Modus versetzt; danach antwortete nichts mehr.
+ * ESC V (1B 56 0D) ist der nativer TheFirmware-Probe. Ein leeres CR holt
+ * den Prompt. Alles andere wuerde das Geraet veraendern.
  */
 static const char *const probes[] = {
-    "\r", "\r\r", "INFO\r", "HELP\r", "?\r"
+    "\r",
+    "\x1b" "V\r",
 };
 #define PROBE_COUNT (sizeof probes / sizeof probes[0])
+
+/* Banner-Marker aus der Firmware-Erkennung */
+static const char *const banner_markers[] = {
+    "TheFirmware", "NORD", "Version 2.7", "Checksum", "Copyright",
+    "DAMA", "SMACK", "cmd:", "CMD:", "TNC", "WA8DED",
+};
 
 static void fmt_line(int databits, int parity, int stopbits,
                      char *dst, size_t dstlen)
@@ -93,50 +103,43 @@ void pr_probe_format(const pr_probe_result *r, char *dst, size_t dstlen)
 /* Byte-orientierte Echo-Behandlung                                        */
 /* ======================================================================= */
 
-/* Entfernt alle Vorkommen von needle. Liefert die neue Laenge. */
 size_t pr_probe_remove_bytes(unsigned char *buf, size_t len,
-                           const unsigned char *needle, size_t nlen)
+                             const unsigned char *needle, size_t nlen)
 {
     if (nlen == 0 || len < nlen)
         return len;
 
-    size_t w = 0;
-    size_t i = 0;
+    size_t w = 0, i = 0;
     while (i < len) {
-        if (i + nlen <= len && memcmp(buf + i, needle, nlen) == 0) {
-            i += nlen;                  /* Muster ueberspringen */
-        } else {
+        if (i + nlen <= len && memcmp(buf + i, needle, nlen) == 0)
+            i += nlen;
+        else
             buf[w++] = buf[i++];
-        }
     }
     return w;
 }
 
 /*
- * Ein Muster das ausschliesslich aus Zeilenenden besteht, taugt nicht zur
- * Echo-Erkennung: ein einzelnes "\r" ist von der Zeilenstruktur einer
- * echten Antwort nicht zu unterscheiden. Solche Muster werden beim
- * Entfernen uebersprungen - sonst geht Inhalt verloren.
+ * Ein Muster ohne inhaltliche Zeichen taugt nicht zur Echo-Erkennung:
+ * ein einzelnes "\r" ist von der Zeilenstruktur einer echten Antwort
+ * nicht zu unterscheiden. Solche Muster werden nicht entfernt.
  */
 static bool pattern_is_degenerate(const char *pat)
 {
     for (const char *p = pat; *p != '\0'; p++) {
         if (*p != '\r' && *p != '\n' && *p != ' ' && *p != '\t')
-            return false;               /* hat echten Inhalt */
+            return false;
     }
     return true;
 }
 
-/*
- * Entfernt das Echo. Laengere Muster zuerst - sonst zerstoert das kurze
- * Muster "\r" die Markierung in "INFO\r".
- */
 size_t pr_probe_strip_echo(unsigned char *buf, size_t len)
 {
     size_t order[PROBE_COUNT];
     for (size_t i = 0; i < PROBE_COUNT; i++)
         order[i] = i;
 
+    /* laengere Muster zuerst */
     for (size_t i = 0; i + 1 < PROBE_COUNT; i++) {
         for (size_t j = i + 1; j < PROBE_COUNT; j++) {
             if (strlen(probes[order[j]]) > strlen(probes[order[i]])) {
@@ -157,7 +160,6 @@ size_t pr_probe_strip_echo(unsigned char *buf, size_t len)
     return len;
 }
 
-/* Anteil druckbarer Zeichen. Muell hat einen sehr niedrigen Wert. */
 double pr_probe_printable_ratio(const unsigned char *buf, size_t len)
 {
     if (len == 0)
@@ -171,7 +173,6 @@ double pr_probe_printable_ratio(const unsigned char *buf, size_t len)
     return (double)ok / (double)len;
 }
 
-/* Bleibt nach dem Entfernen von CR/LF etwas uebrig? */
 bool pr_probe_has_content(const unsigned char *buf, size_t len)
 {
     for (size_t i = 0; i < len; i++) {
@@ -183,43 +184,83 @@ bool pr_probe_has_content(const unsigned char *buf, size_t len)
 }
 
 /* ======================================================================= */
-/* Bewertung                                                               */
+/* Byte-orientierte Suche                                                  */
 /* ======================================================================= */
 
 /*
- * Needles aus den Referenzwerkzeugen: ein TNC antwortet auf einen leeren
- * Prompt mit "cmd:" oder "CMD:" und nennt MYCALL und TXDELAY in der INFO.
+ * Suche ueber rohe Bytes, die NIEMALS an NUL-Bytes haengenbleibt.
+ *
+ * Das ist der dritte Fehler derselben Sortie: Antworten enthalten NULs
+ * (die Ruecksetzfolge hinterlaesst sie), und strstr/strlen halten dort an.
+ * Alles was in einer Antwort sucht, muss ueber memcmp laufen.
  */
+static const unsigned char *memfind_ci(const unsigned char *hay, size_t hlen,
+                                       const char *needle, size_t nlen)
+{
+    if (nlen == 0 || nlen > hlen)
+        return NULL;
+
+    for (size_t i = 0; i + nlen <= hlen; i++) {
+        size_t k = 0;
+        for (; k < nlen; k++) {
+            unsigned char a = hay[i + k];
+            unsigned char b = (unsigned char)needle[k];
+            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b - 'A' + 'a');
+            if (a != b)
+                break;
+        }
+        if (k == nlen)
+            return hay + i;
+    }
+    return NULL;
+}
+
+/* ======================================================================= */
+/* Bewertung                                                               */
+/* ======================================================================= */
+
 int pr_probe_score(const unsigned char *buf, size_t len)
 {
     if (len == 0)
         return 0;
 
-    /* Muell darf nicht punkten - sonst gewinnt ein zufaelliges Profil */
-    if (pr_probe_printable_ratio(buf, len) < 0.70)
+    /*
+     * Ein erkannter Firmware-Banner ist nie Muell, auch wenn die
+     * Ruecksetzfolge NUL-Reste davor hinterlaesst. Der Druckbarkeits-
+     * Filter gilt nur fuer Antworten OHNE Banner.
+     */
+    bool banner = pr_probe_has_banner(buf, len);
+    if (!banner && pr_probe_printable_ratio(buf, len) < 0.70)
         return 0;
 
-    char txt[1024];
-    size_t n = len < sizeof txt - 1 ? len : sizeof txt - 1;
-    memcpy(txt, buf, n);
-    txt[n] = '\0';
-    pr_lower(txt);
-
-    int score = 0;
-    if (strstr(txt, "cmd:")     != NULL) score += 200;
-    if (strstr(txt, "mycall")   != NULL) score += 120;
-    if (strstr(txt, "txdelay")  != NULL) score +=  80;
-    if (strstr(txt, "kiss")     != NULL) score +=  40;
-    if (strstr(txt, "tnc")      != NULL) score +=  30;
-    if (strstr(txt, "help")     != NULL) score +=  20;
-    if (strstr(txt, "monitor")  != NULL) score +=  20;
-    if (strstr(txt, "connected")!= NULL) score +=  20;
-    if (strstr(txt, "version")  != NULL) score +=  15;
-    if (strstr(txt, "nord")     != NULL) score +=  25;
-    if (strstr(txt, "firmware") != NULL) score +=  25;
-    if (strstr(txt, "nocal")    != NULL) score +=  40;
+    /* Marker suchen - ueber Bytes, nicht ueber strstr */
+    int score = banner ? 200 : 0;
+    for (size_t i = 0; i < sizeof banner_markers / sizeof banner_markers[0]; i++) {
+        const char *m = banner_markers[i];
+        if (memfind_ci(buf, len, m, strlen(m)) != NULL)
+            score += 40;
+    }
+    if (memfind_ci(buf, len, "cmd:", 4)   != NULL) score += 160;
+    if (memfind_ci(buf, len, "mycall", 6) != NULL) score += 120;
+    if (memfind_ci(buf, len, "txdelay", 7)!= NULL) score +=  80;
+    if (memfind_ci(buf, len, "kiss", 4)   != NULL) score +=  40;
 
     return score;
+}
+
+/* Banner erkennen - auch wenn die Bewertung noch niedrig ist */
+bool pr_probe_has_banner(const unsigned char *buf, size_t len)
+{
+    if (buf == NULL || len == 0)
+        return false;
+
+    for (size_t i = 0; i < sizeof banner_markers / sizeof banner_markers[0]; i++) {
+        const char *m = banner_markers[i];
+        if (memfind_ci(buf, len, m, strlen(m)) != NULL)
+            return true;
+    }
+    return false;
 }
 
 static void say(pr_probe_cb cb, void *ud, const char *fmt, ...)
@@ -235,68 +276,87 @@ static void say(pr_probe_cb cb, void *ud, const char *fmt, ...)
 }
 
 /* ======================================================================= */
-/* Sweep                                                                   */
+/* Ruecksetzfolge - Port bleibt dabei offen                                */
 /* ======================================================================= */
 
 /*
- * Fuehrt das Geraet in einen bekannten Zustand zurueck.
+ * Reihenfolge aus tnc_serial_recovery.py:
  *
- * Voraussetzung fuer eine zuverlaessige Erkennung: das TNC darf in einem
- * Zustand stecken, in dem es nicht antwortet - etwa im KISS-Modus oder im
- * Hostmode. Die Reihenfolge folgt der bekannten Ruecksetzleiter:
+ *   11 18                       Puffer leeren (^Q^X)
+ *   300 x 00 + JHOST 0          WA8DED-Hostmode verlassen
+ *   C0 FF C0                    KISS verlassen / Firmware-Ruecksetz
+ *   1B 56 0D                    ESC V - Probe
  *
- *   C0 FF C0          KISS verlassen / Firmware-Ruecksetz
- *   11 18             Puffer leeren (^Q ^X)
- *   300 x 00 + JHOST  Hostmode (WA8DED) verlassen
- *   CR CR             Prompt holen
+ * WICHTIG: waehrend ESC QRES (1B 51 52 45 53 0D) muss DTR hoch bleiben.
+ * Deshalb wird der Port hier NIEMALS geschlossen.
  */
-void pr_probe_reset(pr_serial *s)
+size_t pr_probe_reset(pr_serial *s, unsigned char *out, size_t outcap)
 {
     char err[128];
-
-    static const unsigned char kiss_return[] = { 0xC0, 0xFF, 0xC0 };
-    (void)pr_serial_write(s, kiss_return, sizeof kiss_return, err, sizeof err);
-    usleep(400000);
+    size_t total = 0;
 
     static const unsigned char buf_flush[] = { 0x11, 0x18 };
     (void)pr_serial_write(s, buf_flush, sizeof buf_flush, err, sizeof err);
-    usleep(100000);
+    usleep(200000);
 
     unsigned char nuls[300];
     memset(nuls, 0, sizeof nuls);
     (void)pr_serial_write(s, nuls, sizeof nuls, err, sizeof err);
+    usleep(150000);
 
     static const unsigned char jhost[] = {
         0x00, 0x01, 0x06, 'J', 'H', 'O', 'S', 'T', ' ', '0', '\r'
     };
     (void)pr_serial_write(s, jhost, sizeof jhost, err, sizeof err);
-    usleep(300000);
+    usleep(800000);
 
-    (void)pr_serial_write(s, "\r\r", 2, err, sizeof err);
-    usleep(200000);
+    /* C0 FF C0 setzt die Firmware zurueck und laesst den Banner erscheinen */
+    static const unsigned char kiss_return[] = { 0xC0, 0xFF, 0xC0 };
+    (void)pr_serial_write(s, kiss_return, sizeof kiss_return, err, sizeof err);
 
-    /* Was dabei ankam, ist uninteressant - weg damit */
-    pr_serial_flush(s, true, true);
+    /*
+     * Ausreichend lange warten und alles mitnehmen. Der Reset braucht
+     * laut Herleitung rund 2,5 s bis der Banner steht.
+     */
+    unsigned char tmp[512];
+    long n = pr_serial_read_quiet(s, tmp, sizeof tmp, 2500, 600, err, sizeof err);
+    if (n > 0 && out != NULL && outcap > 0) {
+        size_t k = (size_t)n < outcap ? (size_t)n : outcap;
+        memcpy(out, tmp, k);
+        total = k;
+    }
+    return total;
 }
 
-static void run_probes(pr_serial *s, unsigned char *answer, size_t *alen)
+/* ======================================================================= */
+/* Sondieren                                                               */
+/* ======================================================================= */
+
+static size_t run_probes(pr_serial *s, unsigned char *answer, size_t cap)
 {
+    size_t alen = 0;
+
     for (size_t k = 0; k < PROBE_COUNT; k++) {
         char err[128];
         if (pr_serial_write(s, probes[k], strlen(probes[k]), err, sizeof err) != 0)
             break;
 
-        usleep(150000);                 /* dem TNC Zeit zum Reagieren */
+        usleep(400000);                 /* der Firmware Zeit zum Antworten */
 
-        unsigned char tmp[256];
-        long n = pr_serial_read_quiet(s, tmp, sizeof tmp, 600, 150,
+        unsigned char tmp[512];
+        long n = pr_serial_read_quiet(s, tmp, sizeof tmp, 1500, 300,
                                       err, sizeof err);
-        if (n > 0 && *alen + (size_t)n < 900) {
-            memcpy(answer + *alen, tmp, (size_t)n);
-            *alen += (size_t)n;
+        if (n > 0 && alen + (size_t)n < cap) {
+            memcpy(answer + alen, tmp, (size_t)n);
+            alen += (size_t)n;
         }
     }
+    return alen;
 }
+
+/* ======================================================================= */
+/* Sweep - Port wird EINMAL geoeffnet und offen gehalten                   */
+/* ======================================================================= */
 
 int pr_probe_device(const char *dev, pr_probe_result *best,
                     pr_probe_cb progress, void *ud,
@@ -305,10 +365,19 @@ int pr_probe_device(const char *dev, pr_probe_result *best,
     memset(best, 0, sizeof *best);
     pr_strlcpy(best->dev, dev, sizeof best->dev);
 
-    int best_score = -1;
-    int best_clean = -1;
+    /*
+     * EINMAL oeffnen. Alle Profile werden danach nur noch umkonfiguriert.
+     * Ein Schliessen waehrend der Suche wuerde DTR fallen lassen und das
+     * Geraet in den Echo-only-Zustand treiben.
+     */
+    pr_serial s;
+    if (pr_serial_open(&s, dev, 19200, 7, PR_PAR_EVEN, 1, true,
+                       err, errlen) != 0)
+        return -1;
 
-    say(progress, ud, "Schnittstelle %s wird geprueft", dev);
+    say(progress, ud, "Schnittstelle %s geoeffnet - Port bleibt offen", dev);
+
+    int best_score = -1;
 
     for (size_t i = 0; i < PROFILE_COUNT; i++) {
         const pr_profile *p = &profiles[i];
@@ -318,59 +387,43 @@ int pr_probe_device(const char *dev, pr_probe_result *best,
         snprintf(pf, sizeof pf, "%ld %s", p->baud, line);
         say(progress, ud, "  Profil %-14s (%s)", pf, p->name);
 
-        pr_serial s;
-        if (pr_serial_open(&s, dev, p->baud, p->databits, p->parity,
-                           p->stopbits, true, err, errlen) != 0) {
-            say(progress, ud, "    nicht oeffnbar: %s", err);
+        if (pr_serial_reconfigure(&s, p->baud, p->databits, p->parity,
+                                  p->stopbits, err, errlen) != 0) {
+            say(progress, ud, "    nicht setzbar: %s", err);
             continue;
         }
-
+        (void)pr_serial_hold_dtr(&s, err, errlen);
         pr_serial_flush(&s, true, true);
-
-        /* In einen bekannten Zustand - sonst antwortet ein TNC im KISS-
-         * oder Hostmode schlicht nicht und wird als "tot" gemeldet. */
-        pr_probe_reset(&s);
 
         unsigned char answer[1024];
         size_t alen = 0;
-        run_probes(&s, answer, &alen);
-        size_t rawlen = alen;
 
         /*
-         * Echo erkennen. Das ist der normale Zustand im Command-Mode und
-         * wird mit ESC E0 (1B 45 30 0D) ausgeschaltet.
+         * Die Ruecksetzfolge loest bei TheFirmware den Boot-Banner aus.
+         * Diese Antwort ist die wertvollste Information ueberhaupt - sie
+         * wird mitgenommen statt verworfen.
          */
+        alen += pr_probe_reset(&s, answer + alen, sizeof answer - alen);
+        alen += run_probes(&s, answer + alen, sizeof answer - alen);
+        size_t rawlen = alen;
+
+        /* Echo erkennen und entfernen */
         unsigned char probe_copy[1024];
         memcpy(probe_copy, answer, alen);
         size_t stripped = pr_probe_strip_echo(probe_copy, alen);
         bool echo = (rawlen > 0) && !pr_probe_has_content(probe_copy, stripped);
 
-        if (echo) {
-            say(progress, ud, "    nur Echo - Echo wird mit ESC E0 ausgeschaltet");
-
-            static const unsigned char esc_e0[] = { 0x1b, 'E', '0', '\r' };
-            char e[128];
-            if (pr_serial_write(&s, esc_e0, sizeof esc_e0, e, sizeof e) == 0) {
-                usleep(300000);
-                unsigned char drop[256];
-                (void)pr_serial_read_quiet(&s, drop, sizeof drop, 300, 150,
-                                           e, sizeof e);
-            }
-            run_probes(&s, answer, &alen);
-            rawlen = alen;
-        }
-
-        /* Echo entfernen; was bleibt, ist die echte Antwort */
         alen = pr_probe_strip_echo(answer, alen);
 
+        bool banner = pr_probe_has_banner(answer, alen);
         int sc = pr_probe_score(answer, alen);
         double pr = pr_probe_printable_ratio(answer, alen);
-        bool clean = (rawlen > 0) && (echo || pr >= 0.70);
+        bool clean = (rawlen > 0) && (banner || echo || pr >= 0.70);
 
-        say(progress, ud, "    %d Bytes roh, %d nach Echo-Entfernung, "
-                          "Bewertung %d%s",
-            (int)rawlen, (int)alen, sc,
-            echo ? " (Echo erkannt)" : "");
+        say(progress, ud, "    %u Bytes roh, %u nach Echo-Entfernung, "
+                          "Bewertung %d%s%s",
+            (unsigned)rawlen, (unsigned)alen, sc,
+            echo ? " (Echo)" : "", banner ? " [Banner]" : "");
 
         if (pr_probe_has_content(answer, alen)) {
             char show[161];
@@ -380,32 +433,31 @@ int pr_probe_device(const char *dev, pr_probe_result *best,
             say(progress, ud, "    >> %s", show);
         }
 
-        pr_serial_close(&s);
-
         /*
-         * Rangfolge: echte Antwort > sauberes Echo > Muell > Stille.
-         * Ein sauberes Echo bei der richtigen Baudrate ist ein klarer
-         * Hinweis - Muell bei falscher Rate darf das nicht ueberstimmen.
+         * Rangfolge: Banner > echte Antwort > sauberes Echo > Muell.
+         * Ein sauberes Echo beweist die richtige Baudrate - Muell bei
+         * falscher Rate darf das nicht ueberstimmen.
          */
-        int rank = (sc > 0) ? 3 : (clean && echo) ? 2 : (clean) ? 1 : 0;
-        int key = rank * 1000 + (sc > 0 ? sc : 0);
+        int rank = banner ? 5 : (sc > 0) ? 4 : echo ? 3 : clean ? 2 : 0;
+        int key = rank * 1000 + sc;
 
         if (key > best_score) {
             best_score = key;
-            best_clean = rank;
-            best->baud      = p->baud;
-            best->databits  = p->databits;
-            best->parity    = p->parity;
-            best->stopbits  = p->stopbits;
-            best->score     = sc;
-            best->echo_only = echo;
+            best->baud       = p->baud;
+            best->databits   = p->databits;
+            best->parity     = p->parity;
+            best->stopbits   = p->stopbits;
+            best->score      = sc;
+            best->echo_only  = echo;
+            best->banner     = banner;
             best->clean_link = clean;
-            best->responds  = rawlen > 0;
-            pr_strlcpy(best->banner, (const char *)answer, sizeof best->banner);
+            best->responds   = rawlen > 0;
+            pr_strlcpy(best->answer, (const char *)answer, sizeof best->answer);
         }
     }
 
-    (void)best_clean;
+    /* Port erst am Ende schliessen */
+    pr_serial_close(&s);
 
     if (best_score < 0) {
         snprintf(err, errlen, "%s konnte nicht geoeffnet werden", dev);
@@ -413,9 +465,87 @@ int pr_probe_device(const char *dev, pr_probe_result *best,
     }
     if (!best->responds) {
         snprintf(err, errlen,
-                 "%s: keine Antwort in irgendeinem Profil - "
-                 "ist das TNC eingeschaltet und korrekt verkabelt?", dev);
+                 "%s: keine Antwort in irgendeinem Profil.\n"
+                 "  Wichtig: den Port NICHT schliessen, wenn das Geraet neu\n"
+                 "  gestartet wird - fallendes DTR versetzt es in einen\n"
+                 "  Zustand ohne Antwort. Mit --bootwait waehrend des\n"
+                 "  Einschaltens auf den Banner hoeren.", dev);
         return -1;
     }
     return 0;
+}
+
+/* ======================================================================= */
+/* Boot-Abfang                                                             */
+/* ======================================================================= */
+
+int pr_probe_bootwait(const char *dev, long baud, int databits, int parity,
+                      int stopbits, int seconds,
+                      pr_probe_result *best, pr_probe_cb progress, void *ud,
+                      char *err, size_t errlen)
+{
+    memset(best, 0, sizeof *best);
+    pr_strlcpy(best->dev, dev, sizeof best->dev);
+    best->baud = baud;
+
+    pr_serial s;
+    if (pr_serial_open(&s, dev, baud, databits, parity, stopbits, true,
+                       err, errlen) != 0)
+        return -1;
+
+    say(progress, ud, "Port %s offen, DTR/RTS liegen an.", dev);
+    say(progress, ud, "==> Geraet JETZT einschalten - ich hoere %d s auf den Banner.",
+        seconds);
+
+    unsigned char answer[2048];
+    size_t alen = 0;
+
+    /* waehrend des Bootens nur LESEN - nichts senden */
+    for (int i = 0; i < seconds * 5; i++) {
+        unsigned char tmp[256];
+        char e[64];
+        long n = pr_serial_read(&s, tmp, sizeof tmp, 200, e, sizeof e);
+        if (n > 0 && alen + (size_t)n < sizeof answer) {
+            memcpy(answer + alen, tmp, (size_t)n);
+            alen += (size_t)n;
+        }
+    }
+
+    if (alen > 0) {
+        say(progress, ud, "  %u Bytes beim Boot empfangen", (unsigned)alen);
+        char show[161];
+        size_t n = alen < sizeof show - 1 ? alen : sizeof show - 1;
+        memcpy(show, answer, n);
+        show[n] = '\0';
+        say(progress, ud, "  >> %s", show);
+    } else {
+        say(progress, ud, "  kein Banner - versuche ESC V");
+    }
+
+    /* Immer auch ESC V probieren, auch wenn kein Banner kam */
+    unsigned char more[1024];
+    size_t mlen = run_probes(&s, more, sizeof more);
+    if (mlen > 0 && alen + mlen < sizeof answer) {
+        memcpy(answer + alen, more, mlen);
+        alen += mlen;
+    }
+
+    unsigned char stripped[2048];
+    memcpy(stripped, answer, alen);
+    alen = pr_probe_strip_echo(stripped, alen);
+    memcpy(answer, stripped, alen);
+
+    best->score      = pr_probe_score(answer, alen);
+    best->banner     = pr_probe_has_banner(answer, alen);
+    best->responds   = alen > 0;
+    best->clean_link = alen > 0;
+    best->echo_only  = !pr_probe_has_content(answer, alen);
+    pr_strlcpy(best->answer, (const char *)answer, sizeof best->answer);
+
+    /*
+     * Der Port bleibt offen, damit DTR nicht faellt. Der Aufrufer
+     * entscheidet, wann geschlossen wird.
+     */
+    best->fd = s.fd;
+    return best->responds ? 0 : -1;
 }

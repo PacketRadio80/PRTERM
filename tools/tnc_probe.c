@@ -144,7 +144,7 @@ static int do_send(const char *dev, long baud, const char *line, const char *hex
  *   probe  lesende Kommandos senden (Standard)
  *   reset  erst die Ruecksetzfolge, dann lesende Kommandos
  */
-static int do_dump(const char *dev, long baud, const char *line, const char *mode)
+static int do_dump(const char *dev, long baud, const char *line, const char *mode, int seconds)
 {
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (parse_line(line, &databits, &parity, &stopbits) != 0) {
@@ -164,7 +164,7 @@ static int do_dump(const char *dev, long baud, const char *line, const char *mod
 
     if (strcmp(mode, "reset") == 0) {
         printf("-> Ruecksetzfolge (KISS/Hostmode verlassen)\n");
-        pr_probe_reset(&s);
+        pr_probe_reset(&s, NULL, 0);
     }
 
     if (strcmp(mode, "quiet") != 0) {
@@ -183,11 +183,11 @@ static int do_dump(const char *dev, long baud, const char *line, const char *mod
         }
     }
 
-    printf("\n-> Empfang (5 s):\n\n");
+    printf("\n-> Empfang (%d s):\n\n", seconds);
     unsigned char all[4096];
     size_t total = 0;
 
-    for (int i = 0; i < 25; i++) {
+    for (int i = 0; i < seconds * 5; i++) {
         unsigned char chunk[256];
         char e[64];
         long n = pr_serial_read(&s, chunk, sizeof chunk, 200, e, sizeof e);
@@ -235,12 +235,52 @@ static int probe_one(const char *dev, pr_probe_result *best,
     printf("\n  ERGEBNIS fuer %s\n", dev);
     printf("    Profil     : %s\n", pf);
     printf("    Bewertung  : %d\n", best->score);
+    printf("    Banner     : %s\n", best->banner ? "ja" : "nein");
     printf("    Echo       : %s\n", best->echo_only ? "nur Echo (Echo war an)" : "nein");
     printf("    Verbindung : %s\n", best->clean_link ? "sauber" : "unsicher");
+    if (best->answer[0] != '\0')
+        printf("    Antwort    : %.160s\n", best->answer);
 
     printf("\n  Eintrag fuer prterm.ini:\n");
     printf("    port  = %s\n", dev);
     printf("    baud  = %ld\n", best->baud);
+    return 0;
+}
+
+/*
+ * Boot-Abfang. Der Port wird geoeffnet und bleibt offen - DTR/RTS liegen
+ * an, waehrend das Geraet eingeschaltet wird. Genau das ist der Punkt, der
+ * den Unterschied zwischen "antwortet" und "schweigt" macht.
+ */
+static int do_bootwait(const char *dev, long baud, const char *line, int seconds)
+{
+    int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
+    if (parse_line(line, &databits, &parity, &stopbits) != 0) {
+        fprintf(stderr, "Zeilenformat \"%s\" nicht verstanden (z.B. 7E1)\n", line);
+        return 2;
+    }
+
+    char err[256];
+    pr_probe_result best;
+
+    printf("\n*** JETZT DAS GERAET EINSCHALTEN ***\n\n");
+    if (pr_probe_bootwait(dev, baud, databits, parity, stopbits, seconds,
+                          &best, printer, NULL, err, sizeof err) != 0) {
+        printf("\nErgebnis: %s\n", err);
+        if (best.fd >= 0) close(best.fd);
+        return 1;
+    }
+
+    printf("\n  ERGEBNIS\n");
+    printf("    Banner     : %s\n", best.banner ? "ja" : "nein");
+    printf("    Bewertung  : %d\n", best.score);
+    printf("    Antwort    : %.200s\n", best.answer);
+
+    printf("\n  Der Port bleibt offen, damit DTR nicht faellt.\n");
+    printf("  Zum Schliessen: ENTER\n");
+    (void)getchar();
+
+    if (best.fd >= 0) close(best.fd);
     return 0;
 }
 
@@ -281,7 +321,18 @@ int main(int argc, char **argv)
             fprintf(stderr, "Modus muss probe, quiet oder reset sein\n");
             return 2;
         }
-        return do_dump(argv[2], atol(argv[3]), argv[4], mode);
+        int secs = (argc > 6) ? atoi(argv[6]) : 5;
+        return do_dump(argv[2], atol(argv[3]), argv[4], mode, secs);
+    }
+
+    if (strcmp(argv[1], "--bootwait") == 0) {
+        if (argc < 5) {
+            fprintf(stderr, "Aufruf: prterm-probe --bootwait GERAET BAUD LINIE [SEK]\n"
+                            "Port oeffnen, DTR anlegen, DANN das Geraet einschalten.\n");
+            return 2;
+        }
+        int secs = (argc > 5) ? atoi(argv[5]) : 45;
+        return do_bootwait(argv[2], atol(argv[3]), argv[4], secs);
     }
 
     if (strcmp(argv[1], "--send") == 0) {

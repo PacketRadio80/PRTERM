@@ -76,6 +76,23 @@ long pr_serial_read_quiet(pr_serial *s, void *buf, size_t cap,
 /* Puffer leeren (Eingabe, Ausgabe oder beides). */
 int  pr_serial_flush(pr_serial *s, bool input, bool output);
 
+/*
+ * Zeilenformat und Baudrate AENDERN, ohne den Port zu schliessen.
+ *
+ * Das ist wichtig: beim Schliessen faellt DTR, und ein TNC2C versetzt ein
+ * fallendes DTR in einen Echo-only-Zustand, aus dem es nicht antwortet.
+ * Wer mehrere Profile durchprobieren will, darf den Port deshalb nicht
+ * zwischendurch schliessen.
+ */
+int  pr_serial_reconfigure(pr_serial *s, long baud, int databits,
+                           int parity, int stopbits, char *err, size_t errlen);
+
+/*
+ * Haelt die Leitungen DTR/RTS waehrend des Einschaltens eines Geraets.
+ * Der Port bleibt dabei durchgaengig offen.
+ */
+int  pr_serial_hold_dtr(pr_serial *s, char *err, size_t errlen);
+
 bool pr_serial_ok(const pr_serial *s);
 
 /* Leitungsstatus lesen; liefert -1 wenn nicht unterstuetzt. */
