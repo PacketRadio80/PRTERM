@@ -93,6 +93,9 @@ int  pr_serial_reconfigure(pr_serial *s, long baud, int databits,
  */
 int  pr_serial_hold_dtr(pr_serial *s, char *err, size_t errlen);
 
+/* Zerlegt ein Zeilenformat wie "8n1" / "7e1". Liefert false bei ungueltig. */
+bool pr_serial_parse_line(const char *s, int *databits, int *parity, int *stopbits);
+
 bool pr_serial_ok(const pr_serial *s);
 
 /* Leitungsstatus lesen; liefert -1 wenn nicht unterstuetzt. */

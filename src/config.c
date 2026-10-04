@@ -54,6 +54,7 @@ void pr_config_defaults(pr_config *cfg)
     pr_strlcpy(cfg->rig_driver, "sim", sizeof cfg->rig_driver);
     pr_strlcpy(cfg->port, "/dev/ttyUSB0", sizeof cfg->port);
     cfg->baud       = 115200;
+    pr_strlcpy(cfg->serial_line, "8n1", sizeof cfg->serial_line);
     cfg->freq_hz    = 27125000L;
     cfg->mode       = PR_BAND_AM;
     cfg->tx_power_mw = 4000;            /* 4 W ERP - CB-Grenzwert */
@@ -148,6 +149,8 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     pr_lower(cfg->rig_driver);
     copy_str(cfg->port, sizeof cfg->port, i, "radio", "port", "/dev/ttyUSB0");
     cfg->baud = clamp_long(ini_get_int(i, "radio", "baud", 115200), 300, 4000000);
+    copy_str(cfg->serial_line, sizeof cfg->serial_line, i, "radio", "line", "8n1");
+    pr_lower(cfg->serial_line);
     cfg->duplex = pr_duplex_from_name(ini_get(i, "radio", "duplex", "full"));
     cfg->freq_hz = ini_get_int(i, "radio", "freq_hz", 27125000L);
     cfg->mode = pr_band_mode_from_name(ini_get(i, "radio", "mode", "am"));
@@ -252,6 +255,7 @@ void pr_config_write(const pr_config *cfg, ini *i)
     ini_set(i, "radio", "driver", cfg->rig_driver);
     ini_set(i, "radio", "port", cfg->port);
     ini_set_int(i, "radio", "baud", cfg->baud);
+    ini_set(i, "radio", "line", cfg->serial_line);
     ini_set_int(i, "radio", "freq_hz", cfg->freq_hz);
     ini_set(i, "radio", "mode", pr_band_mode_name(cfg->mode));
     ini_set_int(i, "radio", "tx_power_mw", cfg->tx_power_mw);

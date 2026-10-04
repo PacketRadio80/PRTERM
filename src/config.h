@@ -47,6 +47,7 @@ typedef struct pr_config {
     char rig_driver[32];
     char port[PR_CFG_PATH];
     long baud;
+    char serial_line[8];      /* "8n1", "7e1", ... */
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
     long tx_power_mw;         /* Sendeleistung fuer die Compliance-Pruefung */

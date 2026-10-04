@@ -221,6 +221,29 @@ bool pr_serial_ok(const pr_serial *s)
     return s != NULL && s->open && s->fd >= 0;
 }
 
+bool pr_serial_parse_line(const char *s, int *databits, int *parity, int *stopbits)
+{
+    if (s == NULL || strlen(s) != 3)
+        return false;
+    if (s[0] != '7' && s[0] != '8')
+        return false;
+    if (s[1] != 'n' && s[1] != 'N' && s[1] != 'e' && s[1] != 'E' &&
+        s[1] != 'o' && s[1] != 'O')
+        return false;
+    if (s[2] != '1' && s[2] != '2')
+        return false;
+
+    if (databits != NULL) *databits = s[0] - '0';
+    if (parity != NULL) {
+        char c = s[1];
+        if (c == 'e' || c == 'E')      *parity = PR_PAR_EVEN;
+        else if (c == 'o' || c == 'O') *parity = PR_PAR_ODD;
+        else                            *parity = PR_PAR_NONE;
+    }
+    if (stopbits != NULL) *stopbits = s[2] - '0';
+    return true;
+}
+
 /* ======================================================================= */
 /* Lesen und Schreiben                                                     */
 /* ======================================================================= */
