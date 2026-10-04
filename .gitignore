@@ -1,0 +1,27 @@
+# build artifacts
+build/
+build-*/
+out/
+*.o
+*.a
+*.so
+*.cgi
+*.d
+
+# generated sources
+gen/
+
+# runtime state (sessions, rig state, logs) - never commit
+prterm.runtime/
+*.runtime/
+*.state
+*.log
+
+# editor / OS
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/
+compile_commands.json
+.cache/

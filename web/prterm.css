@@ -1,0 +1,531 @@
+/* ==========================================================================
+   PRTERM - CB & Amateurfunk Terminal
+   prterm.css - Erscheinungsbild
+
+   Fläche  : hell, silbrig, leichter Verlauf (gebürstetes Aluminium)
+   Schrift : dunkelblau -> schwarz (vertikaler Verlauf auf Überschriften)
+   Akzent  : Stahlblau
+   Kontur  : kühles Grau-Silber
+
+   Alle Farben als Custom Properties - die Schrift und ihre Größe kommen
+   zusätzlich aus [ui] der prterm.ini und werden von der CGI-Schicht als
+   eigene Properties gesetzt.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Tokens
+   -------------------------------------------------------------------------- */
+:root {
+  /* Fläche - silbrig */
+  --bg-0:      #d6dae1;
+  --bg-1:      #eef1f5;
+  --bg-2:      #b7bec9;
+  --bg-3:      #a3abb8;
+  --panel:     #e4e8ee;
+  --inset:     #c9cfd8;
+
+  /* Schrift - dunkelblau bis schwarz */
+  --fg-top:    #17335f;
+  --fg-bot:    #04070d;
+  --fg:        #0c1c3c;
+  --fg-dim:    #3b4c68;
+  --fg-faint:  #6b7789;
+
+  /* Akzent & Kontur */
+  --accent:    #1e4d8c;
+  --accent-2:  #2f6bb8;
+  --line:      #98a2b1;
+  --line-2:    #78828f;
+  --focus:     #2f6bb8;
+
+  /* Zustände */
+  --rx:        #0e6b4c;
+  --tx:        #8a4b08;
+  --warn:      #8a6a08;
+  --err:       #8c1f28;
+  --banned:    #5c2029;
+
+  /* Schrift - kommt aus der INI, Default bis die CGI-Schicht setzt */
+  --pr-font:   ui-monospace, "SFMono-Regular", "DejaVu Sans Mono",
+               "Liberation Mono", Consolas, monospace;
+  --pr-font-size: 14px;
+  --pr-line-height: 1.2;
+
+  /* Raster */
+  --pad:       10px;
+  --radius:    7px;
+  --gap:       8px;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg-0:      #14181f;
+  --bg-1:      #1d232c;
+  --bg-2:      #0c0f14;
+  --bg-3:      #06080b;
+  --panel:     #1a2029;
+  --inset:     #0e1218;
+  --fg-top:    #cfe0ff;
+  --fg-bot:    #7f95bb;
+  --fg:        #c3d3ee;
+  --fg-dim:    #8fa2c0;
+  --fg-faint:  #5f708c;
+  --accent:    #79b0ff;
+  --accent-2:  #a8cbff;
+  --line:      #2c3644;
+  --line-2:    #3d4a5c;
+  color-scheme: dark;
+}
+
+/* --------------------------------------------------------------------------
+   2. Grundgerüst
+   -------------------------------------------------------------------------- */
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--pr-font);
+  font-size: var(--pr-font-size);
+  line-height: var(--pr-line-height);
+  color: var(--fg);
+  background-color: var(--bg-0);
+  background-image:
+    linear-gradient(160deg, var(--bg-1) 0%, var(--bg-0) 45%, var(--bg-2) 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
+/* --------------------------------------------------------------------------
+   3. Schriftverlauf - nur dort, wo er Wirkung hat
+   -------------------------------------------------------------------------- */
+.grad {
+  background-image: linear-gradient(180deg, var(--fg-top) 0%, var(--fg-bot) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  /* Fallback, falls background-clip nicht unterstuetzt wird */
+  color: var(--fg);
+}
+
+@supports not ((-webkit-background-clip: text) or (background-clip: text)) {
+  .grad { background-image: none; color: var(--fg); }
+}
+
+/* --------------------------------------------------------------------------
+   4. Kopfleiste
+   -------------------------------------------------------------------------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 6px var(--pad);
+  background-image: linear-gradient(180deg, var(--bg-1) 0%, var(--panel) 60%, var(--bg-2) 100%);
+  border-bottom: 1px solid var(--line-2);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .55) inset,
+              0 1px 3px rgba(20, 40, 80, .16);
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+  padding-right: 6px;
+  border-right: 1px solid var(--line);
+  margin-right: 4px;
+}
+.brand-name {
+  font-size: 1.32em;
+  font-weight: 700;
+  letter-spacing: .11em;
+}
+.brand-sub {
+  font-size: .68em;
+  color: var(--fg-dim);
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+/* Status-Chips */
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background-image: linear-gradient(180deg, var(--bg-1), var(--panel));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .6) inset,
+              0 1px 1px rgba(20, 40, 80, .10);
+  font-size: .86em;
+  white-space: nowrap;
+}
+.chip b {
+  font-weight: 600;
+  font-size: .82em;
+  color: var(--fg-faint);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.chip.is-duplex-full { border-color: var(--rx); }
+.chip.is-duplex-half { border-color: var(--warn); }
+.chip.is-link-ok     { border-color: var(--rx); }
+.chip.is-link-bad    { border-color: var(--err); }
+.chip.is-ptt         { border-color: var(--tx); background-color: rgba(138, 75, 8, .12); }
+.chip.is-monitor     { border-color: var(--accent); }
+
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+
+/* Navigation */
+.nav { display: flex; gap: 5px; }
+
+/* --------------------------------------------------------------------------
+   5. Bedienelemente - geprägtes Blech
+   -------------------------------------------------------------------------- */
+button, .btn {
+  font: inherit;
+  font-size: .92em;
+  padding: 4px 13px;
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background-image: linear-gradient(180deg, var(--bg-1) 0%, var(--panel) 55%, var(--bg-2) 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .7) inset,
+              0 -1px 0 rgba(20, 40, 80, .10) inset,
+              0 1px 2px rgba(20, 40, 80, .16);
+  cursor: pointer;
+  transition: background-image .12s ease, box-shadow .12s ease, transform .06s ease;
+  white-space: nowrap;
+}
+button:hover, .btn:hover {
+  background-image: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  border-color: var(--accent);
+}
+button:active, .btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(20, 40, 80, .20) inset;
+}
+button:focus-visible, .btn:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+button[disabled] {
+  opacity: .5;
+  cursor: not-allowed;
+  transform: none;
+}
+button.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background-image: linear-gradient(180deg, var(--bg-0), var(--inset));
+}
+
+button.primary {
+  color: #f2f6fc;
+  border-color: var(--accent);
+  background-image: linear-gradient(180deg, var(--accent-2), var(--accent));
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .3);
+}
+button.primary:hover {
+  background-image: linear-gradient(180deg, var(--accent-2), var(--accent-2));
+}
+
+input, select, textarea {
+  font: inherit;
+  color: var(--fg);
+  padding: 4px 9px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background-color: var(--bg-1);
+  background-image: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  box-shadow: 0 1px 2px rgba(20, 40, 80, .14) inset;
+}
+input::placeholder, textarea::placeholder { color: var(--fg-faint); }
+
+/* --------------------------------------------------------------------------
+   6. Hauptfläche
+   -------------------------------------------------------------------------- */
+.views {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: var(--pad);
+  gap: var(--gap);
+  overflow: hidden;
+}
+
+.view {
+  display: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--gap);
+}
+.view.is-active { display: flex; }
+
+/* --------------------------------------------------------------------------
+   7. Terminal - maximaler Zeichenraum
+   -------------------------------------------------------------------------- */
+.term-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background-color: var(--inset);
+  background-image: linear-gradient(180deg, var(--bg-0), var(--inset));
+  box-shadow: 0 2px 5px rgba(20, 40, 80, .16) inset,
+              0 1px 0 rgba(255, 255, 255, .5);
+  overflow: hidden;
+}
+
+.term {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 4px 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: var(--pr-font);
+  font-size: var(--pr-font-size);
+  line-height: var(--pr-line-height);
+  color: var(--fg);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.term::-webkit-scrollbar { width: 9px; }
+.term::-webkit-scrollbar-track { background: transparent; }
+.term::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Nachrichtenzeilen */
+.ln { display: block; }
+.ln .t   { color: var(--fg-faint); }
+.ln .who { font-weight: 600; }
+.ln-rx .who { color: var(--rx); }
+.ln-tx .who { color: var(--tx); }
+.ln-sys     { color: var(--fg-dim); font-style: italic; }
+.ln-warn    { color: var(--warn); }
+.ln-err     { color: var(--err); }
+.ln-banned  { color: var(--banned); text-decoration: line-through; opacity: .75; }
+.ln .db {
+  color: var(--fg-faint);
+  font-size: .88em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   8. Sendezeile
+   -------------------------------------------------------------------------- */
+.txbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.txbar .tx-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 10px;
+}
+.txbar .spacer { flex: 0 0 auto; }
+
+.ptt-on {
+  color: #fff8f0 !important;
+  border-color: var(--tx) !important;
+  background-image: linear-gradient(180deg, #b8690f, var(--tx)) !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, .35);
+}
+
+/* --------------------------------------------------------------------------
+   9. Karten & Formulare (Administration)
+   -------------------------------------------------------------------------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: var(--gap);
+  overflow-y: auto;
+  padding-right: 2px;
+  align-content: start;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background-image: linear-gradient(180deg, var(--bg-1), var(--panel));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .55) inset,
+              0 1px 3px rgba(20, 40, 80, .12);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card h2 {
+  margin: 0 0 2px;
+  font-size: 1.02em;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label {
+  font-size: .82em;
+  color: var(--fg-dim);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.field .hint {
+  font-size: .78em;
+  color: var(--fg-faint);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.field input, .field select { width: 100%; }
+
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1 1 0; min-width: 0; }
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   10. Tabellen
+   -------------------------------------------------------------------------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .93em;
+}
+th, td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  font-size: .84em;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--fg-faint);
+  border-bottom-color: var(--line-2);
+}
+tr:last-child td { border-bottom: none; }
+td .btn { padding: 1px 8px; font-size: .88em; }
+
+/* --------------------------------------------------------------------------
+   11. Hinweise & Status
+   -------------------------------------------------------------------------- */
+.note {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background-color: var(--panel);
+  font-size: .9em;
+}
+.note-ok   { border-color: var(--rx);   color: var(--rx); }
+.note-err  { border-color: var(--err);  color: var(--err); }
+.note-warn { border-color: var(--warn); color: var(--warn); }
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: .82em;
+  color: var(--fg-dim);
+}
+.badge-gw   { border-color: var(--accent); color: var(--accent); }
+.badge-data { border-color: var(--rx);     color: var(--rx); }
+.badge-ban  { border-color: var(--banned); color: var(--banned); }
+
+/* --------------------------------------------------------------------------
+   12. Kanalraster
+   -------------------------------------------------------------------------- */
+.channels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 3px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.ch {
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background-color: var(--bg-1);
+  font-size: .86em;
+  cursor: pointer;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ch:hover { border-color: var(--accent); }
+.ch.is-current {
+  border-color: var(--accent);
+  background-image: linear-gradient(180deg, var(--accent-2), var(--accent));
+  color: #f2f6fc;
+}
+.ch.is-gw::after   { content: "\2217"; color: var(--accent); margin-left: 3px; }
+.ch.is-data::after { content: "\25a0"; color: var(--rx);     margin-left: 3px; }
+
+/* --------------------------------------------------------------------------
+   13. Kompaktdichte: maximaler Zeichenraum
+   -------------------------------------------------------------------------- */
+[data-density="compact"] .term { padding: 2px 6px; }
+[data-density="compact"] .views { padding: 6px; gap: 6px; }
+[data-density="compact"] .brand-sub { display: none; }
+[data-density="compact"] .topbar { padding: 4px var(--pad); }
+
+/* --------------------------------------------------------------------------
+   14. Responsive
+   -------------------------------------------------------------------------- */
+@media (max-width: 720px) {
+  .brand { border-right: none; padding-right: 0; }
+  .topbar { align-items: stretch; }
+  .nav { width: 100%; }
+  .nav button { flex: 1 1 0; }
+  .row { flex-direction: column; }
+  .cards { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
