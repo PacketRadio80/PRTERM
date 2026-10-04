@@ -103,6 +103,8 @@ set(PRTERM_CORE_SOURCES
     src/config.c
     src/callsign.c
     src/radio.c
+    src/serial.c
+    src/probe.c
     src/state.c
     src/cgi.c
     src/session.c
@@ -155,13 +157,17 @@ if(PRTERM_BUILD_TOOLS)
     add_executable(prterm-ini tools/prterm_ini.c)
     target_link_libraries(prterm-ini PRIVATE prterm_core)
     target_compile_options(prterm-ini PRIVATE ${PRTERM_WARN_FLAGS})
+
+    add_executable(prterm-probe tools/tnc_probe.c)
+    target_link_libraries(prterm-probe PRIVATE prterm_core)
+    target_compile_options(prterm-probe PRIVATE ${PRTERM_WARN_FLAGS})
 endif()
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 if(BUILD_TESTING)
-    foreach(_t ini bands callsign config cgi state)
+    foreach(_t ini bands callsign config cgi probe state)
         add_executable(test_${_t} tests/test_${_t}.c)
         target_link_libraries(test_${_t} PRIVATE prterm_core)
         target_compile_options(test_${_t} PRIVATE ${PRTERM_WARN_FLAGS})
