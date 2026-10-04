@@ -108,19 +108,38 @@ void kiss_decoder_init(kiss_decoder *d)
     memset(d, 0, sizeof *d);
 }
 
+/* Schliesst den laufenden Rahmen ab und stellt ihn in die Warteschlange. */
+static bool kiss_push_frame(kiss_decoder *d)
+{
+    if (d->curlen == 0) {
+        d->in_frame = false;
+        d->esc = false;
+        return false;
+    }
+
+    if (d->qcount < KISS_MAX_PENDING) {
+        size_t slot = (d->qhead + d->qcount) % KISS_MAX_PENDING;
+        memcpy(d->done[slot], d->cur, d->curlen);
+        d->done_len[slot] = d->curlen;
+        d->qcount++;
+    }
+    /* sonst: Rahmen verwerfen, das Geraet sendet schneller als wir lesen */
+
+    d->curlen = 0;
+    d->in_frame = false;
+    d->esc = false;
+    return true;
+}
+
 bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte)
 {
     if (byte == KISS_FEND) {
-        if (d->in_frame && d->len > 0) {
-            /* Rahmen vollstaendig */
-            d->ready = true;
-            d->in_frame = false;
-            d->esc = false;
-            return true;
-        }
+        if (d->in_frame && d->curlen > 0)
+            return kiss_push_frame(d);
+
         /* neuer Rahmen beginnt */
         d->in_frame = true;
-        d->len = 0;
+        d->curlen = 0;
         d->esc = false;
         return false;
     }
@@ -132,50 +151,52 @@ bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte)
         d->esc = false;
         if (byte == KISS_TFEND)      byte = KISS_FEND;
         else if (byte == KISS_TFESC) byte = KISS_FESC;
-        /* sonst: ungueltig, Byte wird trotzdem uebernommen */
     } else if (byte == KISS_FESC) {
         d->esc = true;
         return false;
     }
 
-    if (d->len == 0) {
+    if (d->curlen == 0) {
         /* erstes Byte ist die Typangabe */
         d->cmd  = byte & 0x0fu;
         d->port = (unsigned)(byte >> 4);
     }
 
-    if (d->len < sizeof d->buf)
-        d->buf[d->len++] = byte;
+    if (d->curlen < sizeof d->cur)
+        d->cur[d->curlen++] = byte;
 
     return false;
 }
 
 size_t kiss_decoder_feed_buf(kiss_decoder *d, const unsigned char *buf, size_t len)
 {
-    size_t frames = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (kiss_decoder_feed(d, buf[i]))
-            frames++;
-    }
-    return frames;
+    size_t before = d->qcount;
+    for (size_t i = 0; i < len; i++)
+        (void)kiss_decoder_feed(d, buf[i]);
+    return d->qcount - before;
+}
+
+size_t kiss_decoder_ready(const kiss_decoder *d)
+{
+    return d->qcount;
 }
 
 size_t kiss_decoder_take(kiss_decoder *d, unsigned char *out, size_t outcap)
 {
-    if (!d->ready)
+    if (d->qcount == 0)
         return 0;
 
     /*
-     * Das erste Byte in buf ist die Typangabe - der Nutzen beginnt danach.
+     * Das erste Byte ist die Typangabe - der Nutzen beginnt danach.
      * Bei DATA ist das der AX.25-Rahmen.
      */
-    size_t n = d->len > 0 ? d->len - 1 : 0;
+    size_t n = d->done_len[d->qhead] > 0 ? d->done_len[d->qhead] - 1 : 0;
     if (n > outcap)
         n = outcap;
     if (out != NULL && n > 0)
-        memcpy(out, d->buf + 1, n);
+        memcpy(out, d->done[d->qhead] + 1, n);
 
-    d->ready = false;
-    d->len = 0;
+    d->qhead = (d->qhead + 1) % KISS_MAX_PENDING;
+    d->qcount--;
     return n;
 }

@@ -36,7 +36,7 @@ option(PRTERM_SANITIZE      "Build with ASan/UBSan"              OFF)
 option(PRTERM_BUILD_TOOLS   "Build shell helper tools"           ON)
 
 set(PRTERM_RIG_SIM     ON  CACHE BOOL "Build the simulated rig (no hardware)")
-set(PRTERM_RIG_TNC2    OFF CACHE BOOL "Build the TNC2-class driver (Landolt TNC2C, PK-TNC2)")
+set(PRTERM_RIG_TNC2    ON  CACHE BOOL "Build the TNC2-class driver (Landolt TNC2C, PK-TNC2)")
 set(PRTERM_RIG_TMODEM  OFF CACHE BOOL "Build the T-Modem half-TNC driver")
 set(PRTERM_RIG_MAX25   OFF CACHE BOOL "Build the MAX25-Stack TNC driver")
 
@@ -104,6 +104,7 @@ set(PRTERM_CORE_SOURCES
     src/callsign.c
     src/radio.c
     src/serial.c
+    src/kiss.c
     src/probe.c
     src/state.c
     src/cgi.c
@@ -167,7 +168,7 @@ endif()
 # Tests
 # ---------------------------------------------------------------------------
 if(BUILD_TESTING)
-    foreach(_t ini bands callsign config cgi probe state)
+    foreach(_t ini bands callsign config cgi kiss probe state)
         add_executable(test_${_t} tests/test_${_t}.c)
         target_link_libraries(test_${_t} PRIVATE prterm_core)
         target_compile_options(test_${_t} PRIVATE ${PRTERM_WARN_FLAGS})

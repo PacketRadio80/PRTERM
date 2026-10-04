@@ -305,3 +305,45 @@ bool call_from_ax25(const unsigned char src[7], char *dst, size_t dstlen)
         snprintf(dst, dstlen, "%s", body);
     return true;
 }
+
+/* ======================================================================= */
+/* AX.25-UI-Rahmen                                                         */
+/* ======================================================================= */
+
+/*
+ * Control 0x03 = UI, PID 0xF0 = ohne Unterprotokoll.
+ * Das Endekennung-Bit (0x01) wird an der Quelladresse gesetzt.
+ */
+#define AX25_CTRL_UI 0x03u
+#define AX25_PID_NONE 0xF0u
+
+size_t ax25_ui_frame(unsigned char *out, size_t outcap,
+                     const char *from, const char *to,
+                     const unsigned char *info, size_t infolen)
+{
+    if (out == NULL)
+        return 0;
+
+    unsigned char addr[7];
+    if (outcap < 7 + 7 + 2 + infolen)
+        return 0;
+
+    /* Zieladresse - ohne Endekennung */
+    if (!call_to_ax25(to, addr))
+        return 0;
+    memcpy(out, addr, 7);
+
+    /* Quelladresse - MIT Endekennung */
+    if (!call_to_ax25(from, addr))
+        return 0;
+    addr[6] |= 0x01u;
+    memcpy(out + 7, addr, 7);
+
+    out[14] = AX25_CTRL_UI;
+    out[15] = AX25_PID_NONE;
+
+    if (infolen > 0 && info != NULL)
+        memcpy(out + 16, info, infolen);
+
+    return 16 + infolen;
+}

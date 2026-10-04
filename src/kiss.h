@@ -60,13 +60,26 @@ size_t kiss_encode(unsigned char *out, size_t outcap,
 size_t kiss_escape(unsigned char *out, size_t outcap,
                    const unsigned char *in, size_t inlen);
 
-/* --- Decodieren -------------------------------------------------------- */
+/* --- Decodieren --------------------------------------------------------
+ * Ein Decoder kann mehrere Rahmen aufnehmen, die in EINEM Lesevorgang
+ * ankommen. Ein einzelner Zielrahmen wuerde vom naechsten ueberschrieben. */
+
+#define KISS_MAX_PENDING  8
+#define KISS_FRAME_MAX    640
+
 typedef struct kiss_decoder {
-    unsigned char buf[1024];
-    size_t        len;
+    /* laufender Rahmen */
+    unsigned char cur[KISS_FRAME_MAX];
+    size_t        curlen;
     bool          in_frame;
     bool          esc;
-    bool          ready;       /* vollstaendiger Rahmen in buf */
+
+    /* fertige Rahmen */
+    unsigned char done[KISS_MAX_PENDING][KISS_FRAME_MAX];
+    size_t        done_len[KISS_MAX_PENDING];
+    size_t        qhead;
+    size_t        qcount;
+
     unsigned      cmd;
     unsigned      port;
 } kiss_decoder;
@@ -76,10 +89,16 @@ void kiss_decoder_init(kiss_decoder *d);
 /* Fuettert ein Byte. true wenn dadurch ein Rahmen vollstaendig wurde. */
 bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte);
 
-/* Fuettert einen Block. Liefert die Anzahl vollstaendiger Rahmen. */
+/* Fuettert einen Block. Liefert die Anzahl NEUER vollstaendiger Rahmen. */
 size_t kiss_decoder_feed_buf(kiss_decoder *d, const unsigned char *buf, size_t len);
 
-/* Liefert den zuletzt vollstaendigen Rahmen und setzt zurueck. */
+/* Wie viele Rahmen warten auf Abholung. */
+size_t kiss_decoder_ready(const kiss_decoder *d);
+
+/*
+ * Liefert den aeltesten fertigen Rahmen OHNE Typbyte und nimmt ihn aus der
+ * Warteschlange. 0 wenn keiner wartet oder der Puffer zu klein ist.
+ */
 size_t kiss_decoder_take(kiss_decoder *d, unsigned char *out, size_t outcap);
 
 #endif /* PRTERM_KISS_H */

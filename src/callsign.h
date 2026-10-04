@@ -61,4 +61,17 @@ bool call_to_ax25(const char *id, unsigned char dst[7]);
 /* Umgekehrte Richtung; dst faengt "CALL-SSID" bzw. "CALL". */
 bool call_from_ax25(const unsigned char src[7], char *dst, size_t dstlen);
 
+/* ---- AX.25-Rahmen ---------------------------------------------------- */
+/*
+ * Baut einen UI-Rahmen (ohne FCS - KISS bekommt den Rahmen ohne FCS,
+ * oder mit, je nach Treiber; siehe kiss.c).
+ *
+ * Aufbau: Zieladresse (7) | Quelladresse (7) | Control 0x03 | PID 0xF0 | Info
+ *
+ * Liefert die Laenge, 0 bei Puffermangel oder ungueltigem Rufzeichen.
+ */
+size_t ax25_ui_frame(unsigned char *out, size_t outcap,
+                     const char *from, const char *to,
+                     const unsigned char *info, size_t infolen);
+
 #endif /* PRTERM_CALLSIGN_H */
