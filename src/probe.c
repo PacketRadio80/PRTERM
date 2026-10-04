@@ -255,10 +255,58 @@ bool pr_probe_has_banner(const unsigned char *buf, size_t len)
     if (buf == NULL || len == 0)
         return false;
 
-    for (size_t i = 0; i < sizeof banner_markers / sizeof banner_markers[0]; i++) {
-        const char *m = banner_markers[i];
-        if (memfind_ci(buf, len, m, strlen(m)) != NULL)
-            return true;
+    /*
+     * Nur in DRUCKBAREN Abschnitten suchen.
+     *
+     * Ein kurzer Marker wie "TNC" wuerde in Muell zufaellig passen, und
+     * genau dieser Treffer wuerde dann als Banner gewertet - samt
+     * Aufhebung des Druckbarkeits-Filters. Deshalb wird die Antwort
+     * zuerst in druckbare Stuecke zerlegt und nur darin gesucht.
+     */
+    size_t i = 0;
+    while (i < len) {
+        /* Stueckanfang suchen */
+        while (i < len) {
+            unsigned char c = buf[i];
+            if ((c >= 0x20 && c < 0x7f) || c == '\r' || c == '\n' || c == '\t')
+                break;
+            i++;
+        }
+        size_t start = i;
+
+        /* Stueckende suchen */
+        while (i < len) {
+            unsigned char c = buf[i];
+            if (!((c >= 0x20 && c < 0x7f) || c == '\r' || c == '\n' || c == '\t'))
+                break;
+            i++;
+        }
+        size_t runlen = i - start;
+        if (runlen < 3)
+            continue;
+
+        for (size_t k = 0; k < sizeof banner_markers / sizeof banner_markers[0]; k++) {
+            const char *m = banner_markers[k];
+            size_t mlen = strlen(m);
+
+            /*
+             * Der Treffer braucht UMGEBUNG und Substanz.
+             *
+             *   runlen >= 5          das Textstueck muss mehr sein als
+             *                        ein paar zufaellig druckbare Bytes
+             *   runlen >  mlen       der Marker darf nicht das ganze
+             *                        Stueck ausfuellen - dann stammt er
+             *                        aus Muell, nicht aus einem Text
+             *
+             * Damit faellt "TNC" in drei zufaellig druckbaren Bytes durch,
+             * waehrend ein Prompt wie "cmd: " erkannt bleibt.
+             */
+            if (runlen < 5 || runlen <= mlen)
+                continue;
+
+            if (memfind_ci(buf + start, runlen, m, mlen) != NULL)
+                return true;
+        }
     }
     return false;
 }

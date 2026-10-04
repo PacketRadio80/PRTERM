@@ -38,7 +38,7 @@ option(PRTERM_BUILD_TOOLS   "Build shell helper tools"           ON)
 set(PRTERM_RIG_SIM     ON  CACHE BOOL "Build the simulated rig (no hardware)")
 set(PRTERM_RIG_TNC2    ON  CACHE BOOL "Build the TNC2-class driver (Landolt TNC2C, PK-TNC2)")
 set(PRTERM_RIG_TMODEM  OFF CACHE BOOL "Build the T-Modem half-TNC driver")
-set(PRTERM_RIG_MAX25   OFF CACHE BOOL "Build the MAX25-Stack TNC driver")
+set(PRTERM_RIG_MAX25   ON  CACHE BOOL "Build the MAX25-Stack TNC driver")
 
 # ---------------------------------------------------------------------------
 # Compiler settings

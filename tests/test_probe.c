@@ -170,6 +170,30 @@ int main(void)
         CHECK(pr_probe_score(buf, len) > 200);
     }
 
+    printf("\n== Kurze Marker im Muell ==\n");
+    {
+        /*
+         * Der Marker "TNC" ist nur drei Zeichen lang. In zufaelligem Muell
+         * koennte er passen und wuerde dann als Banner gewertet - samt
+         * Aufhebung des Druckbarkeits-Filters. Er darf nur in druckbarem
+         * Zusammenhang zuschlagen.
+         */
+        unsigned char noise[256];
+        for (size_t i = 0; i < sizeof noise; i++)
+            noise[i] = (unsigned char)(0x80 + (i % 32));
+
+        /* Drei Bytes Muell, die zufaellig "TNC" ergeben */
+        noise[100] = 'T'; noise[101] = 'N'; noise[102] = 'C';
+
+        CHECK(!pr_probe_has_banner(noise, sizeof noise));
+        CHECK_INT(pr_probe_score(noise, sizeof noise), 0);
+
+        /* Dasselbe in druckbarem Zusammenhang ist ein echter Treffer */
+        unsigned char real[64];
+        memcpy(real, "xx TNC yy", 9);
+        CHECK(pr_probe_has_banner(real, 9));
+    }
+
     printf("\n== Muster-Entfernung allgemein ==\n");
     {
         unsigned char b1[] = "abcXXXdefXXX";
