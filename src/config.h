@@ -46,8 +46,10 @@ typedef struct pr_config {
     pr_duplex duplex;
     char rig_driver[32];
     char port[PR_CFG_PATH];
-    long baud;
-    char serial_line[8];      /* "8n1", "7e1", ... */
+    long baud;                    /* seriell: Host <-> TNC            */
+    long radio_baud;              /* auf dem Kanal: 2400 / 1200       */
+    char modem[32];               /* Modem-Typ im TNC, z.B. tcm3105   */
+    char serial_line[8];          /* "8n1", "7e1", ... */
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
     long tx_power_mw;         /* Sendeleistung fuer die Compliance-Pruefung */

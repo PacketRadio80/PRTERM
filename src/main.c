@@ -23,6 +23,7 @@
 #include "html.h"
 #include "ini.h"
 #include "pages.h"
+#include "selftest.h"
 #include "session.h"
 #include "util.h"
 
@@ -88,6 +89,8 @@ static void usage(FILE *f)
 "  -h, --help                diese Hilfe\n"
 "  -V, --version             Version\n"
 "  --check-ini [DATEI]       Konfiguration pruefen\n"
+"  --selftest [DATEI]        Geraete-Zustand pruefen\n"
+"  --reset-tnc [DATEI]       Notfall-Ruecksetzung des TNC ausloesen\n"
 "  --print-config [DATEI]    wirksame Konfiguration anzeigen\n"
 "  --gen-ini [DATEI]         Beispiel-konfiguration erzeugen\n"
 "  --hash-password PASS      Passwort-Hash fuer [admin] pass_hash\n"
@@ -197,6 +200,42 @@ static int cli(int argc, char **argv, const char *ini_path)
     }
     if (strcmp(cmd, "--check-ini") == 0) {
         return cmd_check_ini(argc > 2 ? argv[2] : ini_path);
+    }
+    if (strcmp(cmd, "--selftest") == 0) {
+        const char *path = argc > 2 ? argv[2] : ini_path;
+        char err[256];
+        pr_config cfg;
+        if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
+            fprintf(stderr, "FEHLER: %s\n", err);
+            pr_config_free(&cfg);
+            return 1;
+        }
+        printf("PRTERM Zustandspruefung\n");
+        printf("  Geraet : %s\n", cfg.port);
+        printf("  Treiber: %s\n\n", cfg.rig_driver);
+
+        pr_selftest st;
+        int fails = pr_selftest_run(&cfg, &st);
+        pr_selftest_print(&st, stdout);
+        pr_config_free(&cfg);
+        return fails == 0 ? 0 : 1;
+    }
+    if (strcmp(cmd, "--reset-tnc") == 0) {
+        const char *path = argc > 2 ? argv[2] : ini_path;
+        char err[256];
+        pr_config cfg;
+        if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
+            fprintf(stderr, "FEHLER: %s\n", err);
+            pr_config_free(&cfg);
+            return 1;
+        }
+        printf("PRTERM Notfall-Ruecksetzung fuer %s\n\n", cfg.port);
+
+        pr_selftest st;
+        int fails = pr_selftest_reset(&cfg, &st);
+        pr_selftest_print(&st, stdout);
+        pr_config_free(&cfg);
+        return fails == 0 ? 0 : 1;
     }
     if (strcmp(cmd, "--hash-password") == 0) {
         if (argc < 3) {

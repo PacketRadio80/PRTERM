@@ -111,6 +111,7 @@ set(PRTERM_CORE_SOURCES
     src/session.c
     src/html.c
     src/admin.c
+    src/selftest.c
     src/pages.c
     "${PRTERM_CSS_SRC}"
     "${PRTERM_JS_SRC}")
