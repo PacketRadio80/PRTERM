@@ -106,6 +106,56 @@ static void apply_bans(pr_config *cfg, const ini *i)
     }
 }
 
+/*
+ * Stationen aus [station:NAME] lesen.
+ *
+ * Jede Station ist ein vollständiges Gerät: eigener TNC, eigenes
+ * Funkgerät, eigene Antenne. radio_baud wird gelesen und angezeigt, aber
+ * nie an das Gerät gesendet - die Rate ist Hardware und nicht änderbar.
+ */
+static void apply_stations(pr_config *cfg, const ini *i)
+{
+    cfg->nstations = 0;
+
+    size_t n = ini_count(i);
+    for (size_t k = 0; k < n && cfg->nstations < PR_MAX_STATIONS; k++) {
+        const char *sec = ini_section_at(i, k);
+        if (sec == NULL || !pr_starts_with(sec, "station:"))
+            continue;
+
+        /* Jede Sektion nur einmal übernehmen */
+        bool known = false;
+        for (size_t s = 0; s < cfg->nstations; s++) {
+            if (pr_str_eq_ci(cfg->stations[s].name, sec + 8)) {
+                known = true;
+                break;
+            }
+        }
+        if (known)
+            continue;
+
+        pr_station *st = &cfg->stations[cfg->nstations];
+        memset(st, 0, sizeof *st);
+        pr_strlcpy(st->name, sec + 8, sizeof st->name);
+
+        copy_str(st->rig_driver, sizeof st->rig_driver, i, sec, "driver", "tnc2");
+        copy_str(st->port, sizeof st->port, i, sec, "port", "");
+        st->baud = clamp_long(ini_get_int(i, sec, "baud", 19200), 300, 4000000);
+        st->radio_baud = clamp_long(ini_get_int(i, sec, "radio_baud", 1200), 50, 9600);
+        copy_str(st->modem, sizeof st->modem, i, sec, "modem", "");
+        copy_str(st->serial_line, sizeof st->serial_line, i, sec, "line", "8n1");
+        copy_str(st->antenna, sizeof st->antenna, i, sec, "antenne", "");
+        st->enabled = ini_get_bool(i, sec, "enabled", true);
+
+        char call[PR_CALLSIGN_MAX];
+        copy_str(call, sizeof call, i, sec, "callerid", cfg->callerid);
+        pr_upper(call);
+        pr_strlcpy(st->callerid, call, sizeof st->callerid);
+
+        cfg->nstations++;
+    }
+}
+
 int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
 {
     pr_config_defaults(cfg);
@@ -206,6 +256,9 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
 
     /* [ban] */
     apply_bans(cfg, i);
+
+    /* [station:*] - vollständige Stationen, je TNC + Funkgerät + Antenne */
+    apply_stations(cfg, i);
 
     cfg->bandplan = pr_bandplan_default();
     cfg->raw = NULL;

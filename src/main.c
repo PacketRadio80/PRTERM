@@ -135,6 +135,22 @@ static int cmd_check_ini(const char *path)
            cfg.admin_pass_hash[0] != '\0' ? "gesetzt"
                                           : "KEINES - Login ist gesperrt");
 
+    if (cfg.nstations > 0) {
+        printf("\n  Stationen (%zu):\n", cfg.nstations);
+        for (size_t k = 0; k < cfg.nstations; k++) {
+            const pr_station *st = &cfg.stations[k];
+            printf("    %-10s %s\n", st->name, st->enabled ? "" : "(gesperrt)");
+            printf("               Geraet      : %s\n", st->port);
+            printf("               seriell     : %ld %s\n", st->baud, st->serial_line);
+            printf("               Funk        : %ld Baud%s%s\n", st->radio_baud,
+                   st->modem[0] != '\0' ? " / " : "",
+                   st->modem[0] != '\0' ? st->modem : "");
+            printf("               CALLERID    : %s\n", st->callerid);
+            if (st->antenna[0] != '\0')
+                printf("               Antenne     : %s\n", st->antenna);
+        }
+    }
+
     pr_config_free(&cfg);
     return 0;
 }

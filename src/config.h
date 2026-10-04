@@ -26,6 +26,28 @@ typedef struct pr_ban {
     char reason[128];
 } pr_ban;
 
+/*
+ * Eine Station = TNC + eigenes Funkgerät + eigene Antenne.
+ *
+ * Jede Station ist in sich geschlossen. radio_baud ist HARDWARE und wird
+ * bewusst nicht an das Gerät gesendet - es ist eine Eigenschaft, keine
+ * Anweisung.
+ */
+typedef struct pr_station {
+    char name[32];                 /* Sektionsname: [station:NAME]     */
+    char rig_driver[32];
+    char port[PR_CFG_PATH];
+    long baud;                     /* seriell zum TNC                   */
+    long radio_baud;               /* FEST - Hardware, nicht änderbar   */
+    char modem[32];
+    char serial_line[8];
+    char callerid[PR_CALLSIGN_MAX];
+    char antenna[64];              /* Beschreibung, für die Anzeige     */
+    bool enabled;
+} pr_station;
+
+#define PR_MAX_STATIONS 4
+
 typedef enum pr_duplex {
     PR_DUPLEX_HALF = 0,
     PR_DUPLEX_FULL = 1
@@ -79,6 +101,10 @@ typedef struct pr_config {
     pr_ban *bans;
     size_t nbans;
     size_t cap_bans;
+
+    /* [station:*] - mehrere vollständige Stationen */
+    pr_station stations[PR_MAX_STATIONS];
+    size_t nstations;
 
     /* [paths] */
     char runtime_dir[PR_CFG_PATH];
