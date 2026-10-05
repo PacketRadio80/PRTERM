@@ -519,7 +519,8 @@ static void render_login(pr_buf *out, const pr_session *sess)
         "border-radius:var(--radius);background:var(--panel);color:var(--fg);"
         "padding:18px 20px;min-width:min(340px,90vw)\">\n"
         "<form id=\"loginform\" method=\"post\" action=\"\">\n"
-        "<h2 class=\"grad\" style=\"margin-top:0\">Anmeldung</h2>\n");
+        "<h2 class=\"grad\" style=\"margin-top:0\">Anmeldung</h2>\n"
+        "<div id=\"loginmsg\" class=\"note note-err\" hidden></div>\n");
     html_input_text(out, "user", "", "admin", "Benutzer", "");
     pr_buf_add(out, "<div class=\"field\"><label>Passwort</label>"
                     "<input type=\"password\" id=\"loginpass\" name=\"pass\" "

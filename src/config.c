@@ -57,8 +57,8 @@ void pr_config_defaults(pr_config *cfg)
     cfg->radio_baud = 1200;
     pr_strlcpy(cfg->modem, "", sizeof cfg->modem);
     pr_strlcpy(cfg->serial_line, "8n1", sizeof cfg->serial_line);
-    cfg->freq_hz    = 27125000L;
-    cfg->mode       = PR_BAND_AM;
+    cfg->freq_hz    = 27235000L;
+    cfg->mode       = PR_BAND_FM;       /* Default: FM */
     cfg->tx_power_mw = 4000;            /* 4 W ERP - CB-Grenzwert */
     cfg->rx_poll_ms = 250;
     cfg->max_log    = 500;
@@ -320,6 +320,7 @@ void pr_config_write(const pr_config *cfg, ini *i)
     ini_set_int(i, "radio", "freq_hz", cfg->freq_hz);
     ini_set(i, "radio", "mode", pr_band_mode_name(cfg->mode));
     ini_set_int(i, "radio", "tx_power_mw", cfg->tx_power_mw);
+    /* Default der Betriebsart ist FM */
     ini_set_int(i, "radio", "rx_poll_ms", cfg->rx_poll_ms);
     ini_set_int(i, "radio", "max_log", cfg->max_log);
 

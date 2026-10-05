@@ -100,6 +100,7 @@ set(PRTERM_CORE_SOURCES
     src/sha256.c
     src/ini.c
     src/bands.c
+    src/locator.c
     src/config.c
     src/callsign.c
     src/radio.c

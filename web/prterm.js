@@ -138,6 +138,14 @@
     set("s-freq", fmtFreq(s.freq_hz));
     set("s-mode", String(s.mode || "").toUpperCase());
     set("s-channel", s.channel > 0 ? s.channel : "—");
+
+    // Auswahlkaesten aus dem Zustand zurueckschreiben. Ohne das zeigt der
+    // Mode-Kasten nach einer abgelehnten Umstellung weiterhin den neuen
+    // Wert, obwohl sich am Geraet nichts geaendert hat.
+    var sel = $("selmode");
+    if (sel && sel.value !== (s.mode || "")) sel.value = s.mode || "";
+    var dsel = $("selduplex");
+    if (dsel && dsel.value !== (s.duplex || "")) dsel.value = s.duplex || "";
     set("s-rx", s.rx_count || 0);
     set("s-tx", s.tx_count || 0);
     set("s-signal", (s.rx_db != null ? s.rx_db : "-") + " dBm");
@@ -224,6 +232,18 @@
   }
 
   function flash(msg, kind) {
+    // Zuerst im Login-Dialog zeigen, falls der offen ist - dort war die
+    // Meldung bisher unsichtbar und die Anmeldung wirkte "ohne Meldung".
+    var dlg = $("logindlg");
+    if (dlg && dlg.open) {
+      var lm = $("loginmsg");
+      if (lm) {
+        lm.textContent = msg;
+        lm.className = "note note-" + (kind || "warn");
+        lm.hidden = false;
+      }
+      return;
+    }
     var el = $("flash");
     if (!el) return;
     el.textContent = msg;
@@ -268,8 +288,13 @@
      ---------------------------------------------------------------------- */
   function openLogin() {
     var dlg = $("logindlg");
-    if (dlg && typeof dlg.showModal === "function") dlg.showModal();
-    else if (dlg) dlg.hidden = false;
+    if (!dlg) return;
+    var lm = $("loginmsg");
+    if (lm) lm.hidden = true;      // alte Meldung entfernen
+    if (typeof dlg.showModal === "function") dlg.showModal();
+    else dlg.hidden = false;
+    var u = $("loginuser");
+    if (u) u.focus();
   }
   function closeLogin() {
     var dlg = $("logindlg");
@@ -315,7 +340,14 @@
     var mode = $("selmode");
     if (mode) {
       mode.addEventListener("change", function () {
-        post({ action: "set", mode: mode.value }, function () { refresh(true); });
+        var want = mode.value;
+        post({ action: "set", mode: want }, function (j) {
+          if (j && j.ok === false) {
+            flash(j.error || "Umschalten nicht moeglich", "err");
+          }
+          // Zustand neu lesen - setzt den Kasten auf den echten Wert
+          refresh(true);
+        });
       });
     }
     var duplex = $("selduplex");
@@ -344,6 +376,12 @@
         });
       });
     }
+    qsa("[data-open-login]").forEach(function (b) {
+      b.addEventListener("click", function (e) {
+        e.preventDefault();
+        openLogin();
+      });
+    });
     qsa("[data-close-login]").forEach(function (b) {
       b.addEventListener("click", closeLogin);
     });
