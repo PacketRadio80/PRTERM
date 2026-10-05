@@ -1021,8 +1021,28 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         (void)want;
         /* neue Nachrichten seit dem letzten Abruf waeren besser, aber ein
          * kurzes Fenster reicht fuer die Anzeige */
-        size_t from = nmsg > 12 ? nmsg - 12 : 0;
-        json_state(res, &a, cfg, &sess, msgs + from, nmsg - from, rig_started, station);
+        /*
+         * Nur NOCH NICHT GESEHENE Nachrichten uebergeben.
+         *
+         * Der Client schickt "since" mit dem Zeitstempel der juengsten
+         * bereits angezeigten Meldung. Ohne diese Filterung haengt der
+         * Client dieselbe Meldung bei jedem Abruf erneut an - eine
+         * Einzelmeldung erschien dadurch so oft, wie gerade abgefragt
+         * wurde (15x in derselben Sekunde).
+         */
+        long long since = 0;
+        {
+            const char *sv = pr_req_param(req, "since");
+            if (sv != NULL && sv[0] != '\0')
+                since = atoll(sv);
+        }
+        const pr_msg *tail = msgs;
+        size_t ntail = nmsg;
+        while (ntail > 0 && tail->ts <= since) {
+            tail++;
+            ntail--;
+        }
+        json_state(res, &a, cfg, &sess, tail, ntail, rig_started, station);
         app_stop(&a);
         return 0;
     }

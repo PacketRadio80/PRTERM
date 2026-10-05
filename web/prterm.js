@@ -13,6 +13,7 @@
   var S = {
     view: "terminal",
     station: "",
+    since: 0,
     loggedIn: false,
     cols: 0,
     rows: 0,
@@ -305,14 +306,23 @@
      ---------------------------------------------------------------------- */
   function refresh(force) {
     var q = "?action=state&rows=" + S.rows + "&cols=" + S.cols +
-      (S.station ? "&station=" + encodeURIComponent(S.station) : "");
+      (S.station ? "&station=" + encodeURIComponent(S.station) : "") +
+      (S.since ? "&since=" + S.since : "");
     fetch(q, { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j) return;
         S.loggedIn = !!j.logged_in;
         renderState(j);
-        if (j.messages && j.messages.length) renderLog(j.messages);
+        if (j.messages && j.messages.length) {
+          renderLog(j.messages);
+          /* Merken, was wir kennen - sonst haengt der Client dieselbe
+           * Meldung bei jedem Abruf erneut an. */
+          for (var i = 0; i < j.messages.length; i++) {
+            var ts = j.messages[i].ts || 0;
+            if (ts > S.since) S.since = ts;
+          }
+        }
         if (j.error) flash(j.error, "warn");
       })
       .catch(function () { /* naechster Durchlauf */ });
