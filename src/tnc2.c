@@ -174,52 +174,20 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
     kiss_decoder_init(&t->dec);
 
     /*
-     * KISS-Modus EIN.
+     * BEWUSST KEINE Befehle ans Geraet.
      *
-     * Ohne diesen Schritt bleibt das TNC im Kommandomodus. Dort werden
-     * KISS-Datenrahmen als Text gelesen und nie gesendet - es gibt kein
-     * PTT, keinen Traeger und keine Nachricht, obwohl alles "ok" meldet.
-     * Genau das ist hier passiert.
+     * Ein CGI oeffnet den Port bei JEDEM Aufruf - der Zustandsabruf
+     * laeuft sekuendlich. Frueher wurde dabei jedes Mal die
+     * KISS-Einfahrt geschrieben. Steht das TNC aber schon im KISS-Modus,
+     * ist jedes geschriebene Byte EINE SENDUNG. Das hat zu einem
+     * Dauertransmitter gefuehrt.
      *
-     * Ablauf laut docs/TNC-INIT.md:
-     *   1. Puffer leeren und Hostmode verlassen
-     *   2. ESC @K (1B 40 4B) betritt KISS - bewusst OHNE \r, damit die
-     *      Sequenz nicht als Textzeile verstanden wird
+     * Das Oeffnen eines Geraets darf dessen Zustand nicht veraendern.
+     * In den KISS-Modus fuehrt nur --checkup / --reset-tnc, und zwar
+     * bewusst nach dem Grundsatz: zuerst KISS verlassen (Kontrollrahmen,
+     * sendet nichts), dann im Kommandomodus schreiben, dann KISS
+     * betreten.
      */
-    {
-        char e2[128];
-        static const unsigned char flush[] = { 0x11, 0x18 };
-        (void)pr_serial_write(&t->ser, flush, sizeof flush, e2, sizeof e2);
-        usleep(150000);
-
-        unsigned char nuls[300];
-        memset(nuls, 0, sizeof nuls);
-        (void)pr_serial_write(&t->ser, nuls, sizeof nuls, e2, sizeof e2);
-        usleep(150000);
-
-        static const unsigned char jhost[] = {
-            0x00, 0x01, 0x06, 'J', 'H', 'O', 'S', 'T', ' ', '0', '\r'
-        };
-        (void)pr_serial_write(&t->ser, jhost, sizeof jhost, e2, sizeof e2);
-        usleep(300000);
-
-        /* KISS betreten - die Geraete unterscheiden sich hier. */
-        if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
-            /* PK-TNC2 und TAPR-Klasse: ausgeschriebener Befehl */
-            static const unsigned char kiss_on[] = { 'k','i','s','s',' ','o','n','\r' };
-            (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
-        } else {
-            /* Landolt TNC2C: ESC @K, bewusst OHNE \r */
-            static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
-            (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
-        }
-        usleep(200000);
-
-        /* Reste aus dem Umschalten verwerfen */
-        unsigned char junk[256];
-        (void)pr_serial_read_quiet(&t->ser, junk, sizeof junk, 250, 100,
-                                   e2, sizeof e2);
-    }
 
     if (pr_state_load(cfg, &t->st, err, errlen) != 0) {
         pr_serial_close(&t->ser);

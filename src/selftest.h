@@ -66,6 +66,25 @@ int pr_selftest_run(const pr_config *cfg, pr_selftest *out);
  */
 int pr_selftest_reset(const pr_config *cfg, pr_selftest *out);
 
+/*
+ * Wiederherstellung: stellt sicher, dass das Geraet im KISS-Modus
+ * steht und keinen Speicher voll haengender Rahmen mit sich traegt.
+ *
+ * ACHTUNG - die Reihenfolge ist entscheidend. Solange ein TNC im
+ * KISS-Modus steht, wird JEDES geschriebene Byte gesendet. Ein "mal
+ * eben nachfragen" wuerde also selbst senden. Darum:
+ *
+ *   1. C0 FF C0        KISS verlassen - Kontrollrahmen, geht NICHT auf
+ *                       die Luft
+ *   2. Puffer leeren,   jetzt ist man im Kommandomodus und darf
+ *      Hostmode raus    schreiben, ohne zu senden
+ *   3. ESC V           Probe - bestaetigt den Kommandomodus
+ *   4. KISS betreten    ESC @K bzw. "kiss on\r" je nach Profil
+ *
+ * Rueckgabe 0 wenn alles in Ordnung, sonst Anzahl der Fehler.
+ */
+int pr_checkup(const pr_config *cfg, pr_selftest *out);
+
 /* Ausgabe fuer die Kommandozeile. */
 void pr_selftest_print(const pr_selftest *st, FILE *f);
 

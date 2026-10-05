@@ -115,6 +115,7 @@ static void usage(FILE *f)
 "  -h, --help                diese Hilfe\n"
 "  -V, --version             Version\n"
 "  --check-ini [DATEI]       Konfiguration pruefen\n"
+"  --checkup [DATEI] [STATION]    KISS-Modus sicherstellen, Speicher leeren\n"
 "  --selftest [DATEI] [STATION]   Geraete-Zustand pruefen\n"
 "  --reset-tnc [DATEI] [STATION]  Notfall-Ruecksetzung des TNC ausloesen\n"
 "  --print-config [DATEI]    wirksame Konfiguration anzeigen\n"
@@ -242,6 +243,37 @@ static int cli(int argc, char **argv, const char *ini_path)
     }
     if (strcmp(cmd, "--check-ini") == 0) {
         return cmd_check_ini(argc > 2 ? argv[2] : ini_path);
+    }
+    if (strcmp(cmd, "--checkup") == 0) {
+        const char *path = argc > 2 ? argv[2] : ini_path;
+        char err[256];
+        pr_config cfg;
+        if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
+            fprintf(stderr, "FEHLER: %s\n", err);
+            pr_config_free(&cfg);
+            return 1;
+        }
+        if (argc > 3 && argv[3][0] != '\0') {
+            if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
+                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  vorhanden:");
+                for (size_t k = 0; k < cfg.nstations; k++)
+                    fprintf(stderr, " %s", cfg.stations[k].name);
+                fprintf(stderr, "\n");
+                pr_config_free(&cfg);
+                return 1;
+            }
+        }
+        printf("PRTERM CheckUp\n");
+        printf("  Geraet : %s\n", cfg.port);
+        printf("  Station: %s\n\n",
+               cfg.active_station[0] ? cfg.active_station : "(global)");
+
+        pr_selftest st;
+        int fails = pr_checkup(&cfg, &st);
+        pr_selftest_print(&st, stdout);
+        pr_config_free(&cfg);
+        return fails == 0 ? 0 : 1;
     }
     if (strcmp(cmd, "--selftest") == 0) {
         const char *path = argc > 2 ? argv[2] : ini_path;

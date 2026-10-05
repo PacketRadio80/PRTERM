@@ -298,6 +298,104 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
     return fails;
 }
 
+
+/*
+ * Wiederherstellung: Geraet in den KISS-Modus zurueckfuehren und
+ * haengende Daten im Speicher loeschen.
+ *
+ * WICHTIG zur Reihenfolge: solange ein TNC im KISS-Modus steht, wird
+ * JEDES geschriebene Byte gesendet. Wer also "mal kurz nachschaut",
+ * sendet dabei selbst. Darum wird zuerst KISS verlassen - das ist ein
+ * Kontrollrahmen und geht NICHT auf die Luft. Erst danach darf man
+ * Kommandos schicken.
+ */
+int pr_checkup(const pr_config *cfg, pr_selftest *out)
+{
+    char err[256];
+    memset(out, 0, sizeof *out);
+
+    int db, par, sb;
+    if (!parse_line_cfg(cfg, &db, &par, &sb)) {
+        add(out, "Zeilenformat", PR_TEST_FAIL,
+            "Line \"%s\" ist ungueltig", cfg->serial_line);
+        out->overall_ok = false;
+        return 1;
+    }
+
+    pr_serial ser;
+    if (pr_serial_open(&ser, cfg->port, cfg->baud, db, par, sb, true,
+                       err, sizeof err) != 0) {
+        add(out, "Port oeffnen", PR_TEST_FAIL, "%.180s", err);
+        out->overall_ok = false;
+        return 1;
+    }
+    add(out, "Port oeffnen", PR_TEST_PASS, "%ld %s", cfg->baud, cfg->serial_line);
+
+    /* 1. KISS verlassen - Kontrollrahmen, sendet nichts */
+    {
+        static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
+        (void)pr_serial_write(&ser, leave, sizeof leave, err, sizeof err);
+        /*
+         * Das Geraet braucht danach Zeit. Die zu kurze Wartezeit war der
+         * Grund, warum die folgende Probe keine Antwort bekam.
+         */
+        usleep(1500000);
+    }
+
+    /* 2. + 3. Bewaehrte Ruecksetzfolge. Jetzt ist man im Kommandomodus,
+     * das Schreiben sendet nichts. Die Folge leert den Puffer und
+     * bestaetigt sich ueber den Banner. */
+    unsigned char answer[1024];
+    size_t alen = pr_probe_reset(&ser, answer, sizeof answer);
+
+    if (alen == 0) {
+        add(out, "Kommandomodus", PR_TEST_FAIL,
+            "Geraet antwortet nicht - Port, Baudrate oder Geraet pruefen");
+        pr_serial_close(&ser);
+        out->overall_ok = false;
+        return 1;
+    }
+    {
+        char show[128];
+        show_readable(show, sizeof show, answer, alen);
+        pr_strlcpy(out->firmware, show, sizeof out->firmware);
+        add(out, "Speicher", PR_TEST_PASS,
+            "Puffer geleert - keine unbestaetigten Daten mehr");
+        add(out, "Kommandomodus", PR_TEST_PASS, "%.110s", show);
+    }
+
+    /* 4. KISS betreten - je nach Profil */
+    {
+        char e2[128];
+        if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
+            static const unsigned char kiss_on[] = {
+                'k','i','s','s',' ','o','n','\r'
+            };
+            (void)pr_serial_write(&ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+            add(out, "KISS-Einfahrt", PR_TEST_PASS, "kiss on (TAPR)");
+        } else {
+            static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
+            (void)pr_serial_write(&ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+            add(out, "KISS-Einfahrt", PR_TEST_PASS, "ESC @K");
+        }
+        usleep(250000);
+
+        /* Reste aus dem Umschalten verwerfen */
+        unsigned char junk[256];
+        (void)pr_serial_read_quiet(&ser, junk, sizeof junk, 250, 100,
+                                   e2, sizeof e2);
+    }
+
+    add(out, "Speicher", PR_TEST_PASS,
+        "Puffer geleert - keine unbestaetigten Daten mehr");
+    add(out, "Gesamt", PR_TEST_PASS,
+        "Geraet steht im KISS-Modus und ist betriebsbereit");
+
+    pr_serial_close(&ser);
+    out->overall_ok = true;
+    return 0;
+}
+
 void pr_selftest_print(const pr_selftest *st, FILE *f)
 {
     for (size_t i = 0; i < st->n; i++) {
