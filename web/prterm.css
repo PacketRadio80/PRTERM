@@ -366,6 +366,24 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 .txbar .spacer { flex: 0 0 auto; }
 
+/* Anzurufende Station - steht bewusst GANZ LINKS vor der Eingabe. */
+.txbar .call-lbl {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--ink-2, #4a5b78);
+  padding-right: 2px;
+}
+.txbar .call-input {
+  flex: 0 0 5.5em;
+  min-width: 5.5em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .04em;
+}
+
 .ptt-on {
   color: #fff8f0 !important;
   border-color: var(--tx) !important;

@@ -57,7 +57,7 @@
     S.rows = Math.max(5, Math.floor(rect.height / lineH));
 
     var el = $("gridinfo");
-    if (el) el.textContent = S.cols + " × " + S.rows + " Zeichen";
+    if (el) el.textContent = S.cols + "x" + S.rows;
   }
 
   /* ----------------------------------------------------------------------
@@ -223,7 +223,11 @@
     var text = input.value;
     if (!text.trim()) return;
 
-    post({ action: "tx", text: text }, function (j) {
+    /* Anzurufende Station - bleibt leer fuer Rundruf (CQ). */
+    var call = $("callto");
+    var to = call ? call.value.trim().toUpperCase() : "";
+
+    post({ action: "tx", text: text, to: to }, function (j) {
       if (j && j.ok === false) flash(j.error || "Senden fehlgeschlagen", "err");
       input.value = "";
       input.focus();

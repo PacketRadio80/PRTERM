@@ -348,7 +348,8 @@ static int tnc2_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
     return 0;
 }
 
-static int tnc2_send(pr_rig *r, const char *from, const char *text,
+static int tnc2_send(pr_rig *r, const char *from, const char *to,
+                 const char *text,
                      char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
@@ -366,11 +367,14 @@ static int tnc2_send(pr_rig *r, const char *from, const char *text,
     }
 
     /*
-     * AX.25-UI-Rahmen bauen. Ziel ist CQ - der uebliche Ruf fuer
-     * Ansagen ohne festen Partner.
+     * AX.25-UI-Rahmen bauen. "to" ist die anzurufende Station; leer oder
+     * CQ steht fuer einen Rundruf ohne festen Partner.
      */
+    if (to == NULL || to[0] == '\0')
+        to = "CQ";
+
     unsigned char ui[512];
-    size_t uilen = ax25_ui_frame(ui, sizeof ui, from, "CQ",
+    size_t uilen = ax25_ui_frame(ui, sizeof ui, from, to,
                                  (const unsigned char *)text, strlen(text));
     if (uilen == 0) {
         snprintf(err, errlen, "Rahmen konnte nicht gebaut werden");

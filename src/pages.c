@@ -157,12 +157,12 @@ static int app_tx_gate(app *a, const pr_session *sess,
     return 0;
 }
 
-static int app_tx(app *a, const char *text, const pr_session *sess,
-                  char *err, size_t errlen)
+static int app_tx(app *a, const char *to, const char *text,
+                  const pr_session *sess, char *err, size_t errlen)
 {
     if (app_tx_gate(a, sess, err, errlen) != 0)
         return -1;
-    return a->rig.vtbl->send(&a->rig, a->cfg->callerid, text, err, errlen);
+    return a->rig.vtbl->send(&a->rig, a->cfg->callerid, to, text, err, errlen);
 }
 
 /* Kanal zu einer Frequenz - aus dem Rig-Zustand, nicht aus der Config.
@@ -288,6 +288,11 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
 
     pr_buf_add(out,
         "<form class=\"txbar\" id=\"txform\" autocomplete=\"off\">\n"
+        "  <label class=\"call-lbl\" for=\"callto\" title=\"Anzurufende Station\">"
+        "CALL:</label>\n"
+        "  <input class=\"call-input\" type=\"text\" id=\"callto\" name=\"callto\" "
+        "placeholder=\"CQ\" maxlength=\"9\" spellcheck=\"false\" "
+        "autocapitalize=\"characters\" autocomplete=\"off\">\n"
         "  <input class=\"tx-input\" type=\"text\" id=\"txtext\" name=\"text\" "
         "placeholder=\"Nachricht eingeben &#8230;  [Enter] senden\" "
         "enterkeyhint=\"send\" spellcheck=\"false\">\n"
@@ -784,10 +789,11 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         if (strcmp(action, "tx") == 0) {
             const char *text = pr_req_param(req, "text");
+            const char *to   = pr_req_param(req, "to");
             char err[256];
             if (!rig_started) {
                 json_err(res, a.err);
-            } else if (app_tx(&a, text, &sess, err, sizeof err) != 0) {
+            } else if (app_tx(&a, to, text, &sess, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
                 json_ok(res);

@@ -79,9 +79,10 @@ typedef struct pr_rig_vtbl {
     int  (*set_duplex)(pr_rig *r, pr_duplex d, char *err, size_t errlen);
     int  (*set_monitor)(pr_rig *r, bool on, char *err, size_t errlen);
 
-    /* Senden. Die Compliance-Pruefung liegt VORHER im Aufrufer. */
-    int  (*send)(pr_rig *r, const char *from, const char *text,
-                 char *err, size_t errlen);
+    /* Senden. Die Compliance-Pruefung liegt VORHER im Aufrufer.
+     * "to" ist die anzurufende Station, leer oder "CQ" = Rundruf. */
+    int  (*send)(pr_rig *r, const char *from, const char *to,
+                 const char *text, char *err, size_t errlen);
 
     /* Pruef-Trager: haelt die Sendung fuer eine gegebene Zeit offen.
      *

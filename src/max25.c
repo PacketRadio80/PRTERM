@@ -528,9 +528,11 @@ static int max25_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
     return max25_simple_cmd(r, cmd, err, errlen);
 }
 
-static int max25_send(pr_rig *r, const char *from, const char *text,
+static int max25_send(pr_rig *r, const char *from, const char *to,
+                 const char *text,
                       char *err, size_t errlen)
 {
+    (void)to;   /* Ziel ist bei diesem Treiber ohne Bedeutung */
     max25_impl *m = r->impl;
     if (m == NULL) {
         snprintf(err, errlen, "MAX25 nicht verbunden");

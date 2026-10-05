@@ -337,9 +337,11 @@ static int sim_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
     return 0;
 }
 
-static int sim_send(pr_rig *r, const char *from, const char *text,
+static int sim_send(pr_rig *r, const char *from, const char *to,
+                 const char *text,
                     char *err, size_t errlen)
 {
+    (void)to;   /* Ziel ist bei diesem Treiber ohne Bedeutung */
     sim_impl *s = r->impl;
     if (s == NULL) {
         snprintf(err, errlen, "Simulation nicht offen");
