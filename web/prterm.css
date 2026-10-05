@@ -205,6 +205,17 @@ body {
 /* Navigation */
 .nav { display: flex; gap: 5px; }
 
+/*
+ * Stationsreiter links - bewusst im SELBEN Stil wie Terminal /
+ * Administration rechts. Was gedrueckt ist, erkennt man auf beiden
+ * Seiten gleich: Akzentfarbe, abgesetzte Kante, eingesunkene Flaeche.
+ */
+.station-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
+.station-tabs .stab {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+
 /* --------------------------------------------------------------------------
    5. Bedienelemente - geprägtes Blech
    -------------------------------------------------------------------------- */

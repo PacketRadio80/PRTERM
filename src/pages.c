@@ -210,14 +210,14 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
             pr_buf_addf(out,
                 "      <button type=\"button\" class=\"stab%s\" data-station=\"%s\">"
                 "%.3f@%ld</button>\n",
-                k == 0 ? " is-current" : "",
+                k == 0 ? " is-active" : "",
                 sta->name,
                 cfg->freq_hz / 1000000.0,
                 sta->radio_baud);
         }
     } else {
         pr_buf_addf(out,
-            "      <button type=\"button\" class=\"stab is-current\">"
+            "      <button type=\"button\" class=\"stab is-active\">"
             "%.3f@%ld</button>\n",
             cfg->freq_hz / 1000000.0, cfg->radio_baud);
     }

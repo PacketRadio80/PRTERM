@@ -389,8 +389,9 @@
     /* Stationsreiter - jeder steht fuer eine eigene Hardware */
     qsa("[data-station]").forEach(function (b) {
       b.addEventListener("click", function () {
-        qsa("[data-station]").forEach(function (x) { x.classList.remove("is-current"); });
-        b.classList.add("is-current");
+        /* dieselbe Markierung wie Terminal / Administration rechts */
+        qsa("[data-station]").forEach(function (x) { x.classList.remove("is-active"); });
+        b.classList.add("is-active");
         S.station = b.getAttribute("data-station") || "";
         refresh(true);
       });
