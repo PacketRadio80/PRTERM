@@ -285,12 +285,33 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
     char e2[128];
     tx_prepare(&st->ser);
 
-    /* 1. KISS verlassen - Kontrollrahmen, sendet nichts */
+    /*
+     * 1. KISS verlassen.
+     *
+     * ACHTUNG: C0 FF C0 setzt bei TheFirmware die FIRMWARE zurueck -
+     * das ist der Grund, warum dabei der Banner erscheint und die LEDs
+     * Status/Connected das Startmuster zeigen (2-3 Sekunden, siehe
+     * Landolt-Handbuch). Nach dem Ruecksetz ist MYCALL weg, und
+     * UNPROTO wuerde mit einer falschen Kennung senden.
+     *
+     * Darum: ausreichend warten UND die Kennung erneut setzen.
+     */
     static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
     (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
-    usleep(600000);
+    usleep(3000000);   /* Startvorgang abwarten: Status/Connected 2-3 s */
 
-    /* 2. UNPROTO <Ziel> 0 <Text> */
+    /* 2. MYCALL wieder setzen - sonst sendet UNPROTO mit der falschen
+     *    Kennung auf die Luft. */
+    {
+        char myc[32];
+        snprintf(myc, sizeof myc, "%.1sI %.9s\r", "\x1b", st->cfg.callerid);
+        (void)pr_serial_write(&st->ser, myc, strlen(myc), e2, sizeof e2);
+        usleep(400000);
+        unsigned char jj[128];
+        (void)pr_serial_read_quiet(&st->ser, jj, sizeof jj, 400, 150, e2, sizeof e2);
+    }
+
+    /* 3. UNPROTO <Ziel> 0 <Text> */
     char cmd[PR_MSG_TEXT + 64];
     int k = snprintf(cmd, sizeof cmd, "UNPROTO %.9s 0 %s\r", dst, text);
     if (k <= 0 || (size_t)k >= sizeof cmd) {
@@ -301,10 +322,10 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
         return -1;
     tx_finish(&st->ser);
 
-    /* 3. abwarten, bis das TNC gesendet hat */
+    /* 4. abwarten, bis das TNC gesendet hat */
     usleep(1200000);
 
-    /* 4. KISS wieder betreten (inkl. Parameter) */
+    /* 5. KISS wieder betreten (inkl. Parameter) */
     {
         static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
         if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
