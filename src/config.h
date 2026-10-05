@@ -42,6 +42,17 @@ typedef struct pr_station {
     char modem[32];
     char serial_line[8];
     char kiss_init[16];           /* "esc" oder "tapr" - siehe radio.h */
+    /*
+     * Wie gesendet wird:
+     *   kiss     KISS-Datenrahmen
+     *   unproto  KISS verlassen, "UNPROTO <Ziel> 0 <Text>" senden,
+     *            wieder KISS betreten
+     *
+     * TheFirmware (TNC2-Klasse) ignoriert KISS-Daten auf hybriden
+     * Aufbauten, waehrend UNPROTO aus dem Kommandomodus den Traeger
+     * zuverlaessig schaltet. Deshalb ist "unproto" die sichere Wahl.
+     */
+    char tx_mode[16];
     char callerid[PR_CALLSIGN_MAX];
     char antenna[64];              /* Beschreibung, für die Anzeige     */
     bool enabled;
@@ -86,6 +97,7 @@ typedef struct pr_config {
      *   tapr  "kiss on\r"                   - PK-TNC2, TAPR-Klasse
      */
     char kiss_init[16];
+    char tx_mode[16];
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
     long tx_power_mw;         /* Sendeleistung fuer die Compliance-Pruefung */

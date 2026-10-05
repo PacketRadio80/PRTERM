@@ -33,7 +33,9 @@
 #include "prterm_compat.h"
 
 #include "config.h"
+#include "radio.h"
 #include "serial.h"
+#include "callsign.h"
 #include "tncsock.h"
 #include "util.h"
 
@@ -46,7 +48,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <sys/un.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -127,7 +131,23 @@ static bool enter_kiss(tncd_station *st, char *err, size_t errlen)
                                    e2, sizeof e2);
     }
 
-    /* 4. KISS betreten */
+    /*
+     * 4. MYCALL setzen. Das TNC muss seine eigene Kennung kennen -
+     *    ohne das geht die Ruecklaufkennung nicht, und manche Firmware
+     *    laesst ohne MYCALL gar keinen Rahmen zu.
+     */
+    {
+        char myc[32];
+        snprintf(myc, sizeof myc, "%.1sI %.9s\r",
+                 "\x1b", st->cfg.callerid);
+        (void)pr_serial_write(&st->ser, myc, strlen(myc), e2, sizeof e2);
+        usleep(400000);
+        unsigned char junk[128];
+        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 400, 150,
+                                   e2, sizeof e2);
+    }
+
+    /* 5. KISS betreten */
     {
         if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
             static const unsigned char kiss_on[] = {
@@ -145,6 +165,30 @@ static bool enter_kiss(tncd_station *st, char *err, size_t errlen)
         unsigned char junk[256];
         (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 250, 100,
                                    e2, sizeof e2);
+    }
+
+    /*
+     * 6. KISS-Parameter setzen. Werte wie im CB-Betrieb ueblich:
+     *    TXDELAY 50  - PTT-Vorlauf in 10ms-Schritten
+     *    PERSIST 255 - immer senden, kein ALOHA-Zufall (Sondernutzung)
+     *    SLOTTIME 10 - Sperrzeit
+     *    TXTAIL 1    - PTT-Nachlauf
+     *    FULLDUPLEX 0
+     */
+    {
+        static const struct { unsigned char cmd, val; } kp[] = {
+            { 0x01, 50 },   /* TXDELAY  */
+            { 0x02, 255 },  /* PERSIST  */
+            { 0x03, 10 },   /* SLOTTIME */
+            { 0x04, 1 },    /* TXTAIL   */
+            { 0x05, 0 }     /* FULLDUPLEX */
+        };
+        for (size_t i = 0; i < sizeof kp / sizeof kp[0]; i++) {
+            unsigned char f[6];
+            f[0] = 0xC0; f[1] = kp[i].cmd; f[2] = kp[i].val; f[3] = 0xC0;
+            (void)pr_serial_write(&st->ser, f, 4, e2, sizeof e2);
+        }
+        usleep(200000);
     }
 
     st->kiss_ok = true;
@@ -172,6 +216,114 @@ static bool station_open(tncd_station *st, char *err, size_t errlen)
 }
 
 /* ---- Empfang einsammeln -------------------------------------------- */
+
+
+/*
+ * Sichern, dass DTR/RTS anliegen, und warten bis der Sendepuffer
+ * wirklich raus ist.
+ *
+ * Zwei Dinge, die der MAX25-Stack so macht und die hier gefehlt haben:
+ *   - DTR wird bei JEDEM Schreibvorgang erneut gesetzt. Faellt es
+ *     zwischendurch, verlaesst der TNC2C den KISS-Modus.
+ *   - tcdrain() wartet, bis die Bytes die Schnittstelle verlassen
+ *     haben. Ohne das glaubt der Aufrufer, die Sendung sei vorbei,
+ *     waehrend das TNC noch sendet.
+ */
+static void tx_prepare(pr_serial *ser)
+{
+#ifdef TIOCMGET
+    int flags = 0;
+    if (ioctl(ser->fd, TIOCMGET, &flags) == 0) {
+        flags |= TIOCM_RTS | TIOCM_DTR;
+        (void)ioctl(ser->fd, TIOCMSET, &flags);
+    }
+#else
+    (void)ser;
+#endif
+}
+
+static void tx_finish(pr_serial *ser)
+{
+    if (ser->fd >= 0)
+        (void)tcdrain(ser->fd);
+}
+
+
+/*
+ * UNPROTO-Sendeweg.
+ *
+ * TheFirmware (TNC2-Klasse) ignoriert auf hybriden Aufbauten oft
+ * KISS-Datenrahmen, waehrend UNPROTO aus dem Kommandomodus den Traeger
+ * zuverlaessig schaltet. Das ist genau das Symptom "PTT nur manchmal".
+ *
+ * Ablauf: KISS verlassen -> UNPROTO senden -> abwarten -> KISS wieder
+ * betreten. Der Rahmen wird dabei ausgewertet, um Ziel und Text zu
+ * bekommen; was sonst darin steckt, entfaellt.
+ */
+static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len,
+                        char *err, size_t errlen)
+{
+    /* AX.25-UI: Ziel(7) Quelle(7) Control(1) PID(1) Nutzdaten */
+    if (len < 16) {
+        snprintf(err, errlen, "Rahmen zu kurz");
+        return -1;
+    }
+
+    char dst[16], src[16];
+    if (!call_from_ax25(frame, dst, sizeof dst) ||
+        !call_from_ax25(frame + 7, src, sizeof src)) {
+        snprintf(err, errlen, "Rufzeichen nicht lesbar");
+        return -1;
+    }
+
+    char text[PR_MSG_TEXT];
+    size_t n = len - 16;
+    if (n >= sizeof text) n = sizeof text - 1;
+    memcpy(text, frame + 16, n);
+    text[n] = '\0';
+
+    char e2[128];
+    tx_prepare(&st->ser);
+
+    /* 1. KISS verlassen - Kontrollrahmen, sendet nichts */
+    static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
+    (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
+    usleep(600000);
+
+    /* 2. UNPROTO <Ziel> 0 <Text> */
+    char cmd[PR_MSG_TEXT + 64];
+    int k = snprintf(cmd, sizeof cmd, "UNPROTO %.9s 0 %s\r", dst, text);
+    if (k <= 0 || (size_t)k >= sizeof cmd) {
+        snprintf(err, errlen, "Nachricht zu lang");
+        return -1;
+    }
+    if (pr_serial_write(&st->ser, cmd, (size_t)k, err, errlen) != 0)
+        return -1;
+    tx_finish(&st->ser);
+
+    /* 3. abwarten, bis das TNC gesendet hat */
+    usleep(1200000);
+
+    /* 4. KISS wieder betreten (inkl. Parameter) */
+    {
+        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
+        if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
+            static const unsigned char ko[] = { 'k','i','s','s',' ','o','n','\r' };
+            (void)pr_serial_write(&st->ser, ko, sizeof ko, e2, sizeof e2);
+        } else {
+            (void)pr_serial_write(&st->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+        }
+        usleep(300000);
+        static const struct { unsigned char cmd, val; } kp[] = {
+            { 0x01, 50 }, { 0x02, 255 }, { 0x03, 10 }, { 0x04, 1 }, { 0x05, 0 }
+        };
+        for (size_t i = 0; i < sizeof kp / sizeof kp[0]; i++) {
+            unsigned char f[4] = { 0xC0, kp[i].cmd, kp[i].val, 0xC0 };
+            (void)pr_serial_write(&st->ser, f, 4, e2, sizeof e2);
+        }
+    }
+    return 0;
+}
 
 static void station_pump(tncd_station *st)
 {
@@ -240,10 +392,20 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             return;
         }
         char err[256];
+        if (pr_str_eq_ci(st->cfg.tx_mode, "unproto")) {
+            if (send_unproto(st, data, n, err, sizeof err) != 0) {
+                answer(fd, "ERR %.200s", err);
+                return;
+            }
+            answer(fd, "OK %zu (unproto)", n);
+            return;
+        }
+        tx_prepare(&st->ser);
         if (pr_serial_write(&st->ser, data, n, err, sizeof err) != 0) {
             answer(fd, "ERR %.200s", err);
             return;
         }
+        tx_finish(&st->ser);
         answer(fd, "OK %zu", n);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_RX)) {
@@ -377,12 +539,24 @@ static int run_daemon(tncd_station *stations, size_t nst)
             }
         }
 
-        /* KISS periodisch nachhalten */
+        /*
+         * KISS periodisch nachhalten.
+         *
+         * WICHTIG: die Nachpruefung darf den Betrieb NICHT stoeren.
+         * enter_kiss() braucht rund 3 Sekunden und schreibt dabei auf
+         * den Port. Fiel das in eine Sendefolge, ging genau diese
+         * Sendung verloren - man sah nur einzelne PTT statt aller.
+         *
+         * Deshalb: nur nachhalten, wenn seit der letzten Sendung genug
+         * Ruhe war, und grundsaetzlich selten. Der Daemon haelt den Port
+         * offen, KISS geht darum nicht von selbst verloren.
+         */
         for (size_t i = 0; i < nst; i++) {
             tncd_station *st = &stations[i];
             if (!st->open)
                 continue;
-            if (time(NULL) - st->last_check > 60) {
+            time_t idle = time(NULL) - st->last_check;
+            if (idle > 600 && st->rx_len == 0) {
                 (void)enter_kiss(st, err, sizeof err);
             }
         }

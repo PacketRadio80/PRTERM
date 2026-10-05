@@ -29,6 +29,7 @@
 #include "callsign.h"
 #include "kiss.h"
 #include "serial.h"
+#include "tncsock.h"
 #include "state.h"
 #include "util.h"
 
@@ -40,7 +41,7 @@
 #define TNC2_MAX_PENDING 32
 
 typedef struct tnc2_impl {
-    pr_serial    ser;
+    pr_tncsock   sock;   /* zum Daemon, der den Port offen haelt */
     pr_rig_state st;
     kiss_decoder dec;
 
@@ -165,11 +166,22 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
         return -1;
     }
 
-    if (pr_serial_open(&t->ser, cfg->port, cfg->baud, databits, parity, stopbits,
-                       true, err, errlen) != 0) {
-        free(t);
-        return -1;
+    /*
+     * Der Port wird NICHT hier geoeffnet. Das uebernimmt prterm-tncd,
+     * der ihn offen haelt und KISS fuehrt. Ein CGI, das den Port selbst
+     * oeffnet, reisst den TNC2C bei jedem Aufruf aus KISS.
+     */
+    {
+        char sock[512];
+        snprintf(sock, sizeof sock, "%.400s/tnc-%.32s.sock",
+                 cfg->runtime_dir,
+                 cfg->active_station[0] ? cfg->active_station : "default");
+        if (pr_tncsock_open(&t->sock, sock, err, errlen) != 0) {
+            free(t);
+            return -1;
+        }
     }
+    (void)databits; (void)parity; (void)stopbits;
 
     kiss_decoder_init(&t->dec);
 
@@ -190,7 +202,7 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
      */
 
     if (pr_state_load(cfg, &t->st, err, errlen) != 0) {
-        pr_serial_close(&t->ser);
+        pr_tncsock_close(&t->sock);
         free(t);
         return -1;
     }
@@ -230,7 +242,7 @@ static void tnc2_close(pr_rig *r)
      * Der Port wird geschlossen - erst im KISS-Betrieb ist das unkritisch.
      * Im Command-Mode wuerde das DTR den Echo-only-Zustand ausloesen.
      */
-    pr_serial_close(&t->ser);
+    pr_tncsock_close(&t->sock);
     free(t);
     r->impl = NULL;
 }
@@ -251,7 +263,7 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
 
     /* Empfangene Rahmen abholen */
     unsigned char buf[2048];
-    long n = pr_serial_read(&t->ser, buf, sizeof buf, 50, err, errlen);
+    long n = pr_tncsock_rx(&t->sock, buf, sizeof buf, err, errlen);
     if (n < 0)
         return -1;
 
@@ -352,7 +364,7 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
     }
     if (n > 0) {
         char e2[64];
-        (void)pr_serial_write(&t->ser, frame, n, e2, sizeof e2);
+        (void)(void)pr_tncsock_tx(&t->sock, frame, n, e2, sizeof e2);
     }
 
     tnc2_save(r, t);
@@ -418,7 +430,7 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
         return -1;
     }
 
-    if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0)
+    if (pr_tncsock_tx(&t->sock, frame, flen, err, errlen) != 0)
         return -1;
 
     tnc2_note(r, PR_MSG_TX, from, text);
@@ -508,7 +520,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
             return -1;
         }
 
-        if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0) {
+        if (pr_tncsock_tx(&t->sock, frame, flen, err, errlen) != 0) {
             t->st.ptt = false;
             t->st.rx_muted = false;
             return -1;
