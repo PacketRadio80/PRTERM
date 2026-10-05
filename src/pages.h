@@ -20,6 +20,10 @@
 int pr_handle(pr_request *req, pr_response *res, pr_config *cfg);
 
 /* Seiten (fuer Tests einzeln aufrufbar) */
+/* Gibt den CSRF-Token als <meta>-Tag aus, damit das JavaScript ihn
+ * mitschicken kann. */
+void page_csrf_meta(pr_buf *out, const pr_session *sess);
+
 void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
                  const pr_rig_state *st, const pr_msg *msgs, size_t nmsg,
                  const char *flash_kind, const char *flash_msg);

@@ -572,6 +572,7 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
     snprintf(title, sizeof title, "%s", cfg->site_name);
 
     html_open(out, cfg, sess, title);
+    page_csrf_meta(out, sess);
 
     pr_buf_add(out, "<div class=\"app\">\n");
     render_topbar(out, cfg, sess, st);
@@ -613,6 +614,21 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
     }
 
     html_close(out, cfg);
+}
+
+/*
+ * Der CSRF-Token muss im Dokument stehen, damit ihn das JavaScript
+ * mitschicken kann. Ohne das schlagen alle fetch-Aktionen (PTT, Senden,
+ * Umschalten) bei angemeldeten Nutzern mit "Token ungueltig" fehl -
+ * die Formulare funktionierten, die Knoepfe nicht.
+ */
+void page_csrf_meta(pr_buf *out, const pr_session *sess)
+{
+    if (sess == NULL || !sess->valid)
+        return;
+    pr_buf_add(out, "<meta name=\"csrf\" content=\"");
+    pr_attr_escape(out, sess->csrf);
+    pr_buf_add(out, "\">\n");
 }
 
 /* ======================================================================= */

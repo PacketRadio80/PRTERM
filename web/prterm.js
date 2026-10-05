@@ -191,6 +191,10 @@
      Jeder Reiter steht fuer eine vollstaendige Station. */
   function withStation(data) {
     if (S.station) data.station = S.station;
+    /* CSRF-Token mitschicken. Ohne das schlagen alle fetch-Aktionen
+     * bei angemeldeten Nutzern mit "Token ungueltig" fehl. */
+    var meta = document.querySelector('meta[name="csrf"]');
+    if (meta) data.csrf = meta.getAttribute("content");
     return data;
   }
 
