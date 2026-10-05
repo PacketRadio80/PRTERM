@@ -173,6 +173,47 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
 
     kiss_decoder_init(&t->dec);
 
+    /*
+     * KISS-Modus EIN.
+     *
+     * Ohne diesen Schritt bleibt das TNC im Kommandomodus. Dort werden
+     * KISS-Datenrahmen als Text gelesen und nie gesendet - es gibt kein
+     * PTT, keinen Traeger und keine Nachricht, obwohl alles "ok" meldet.
+     * Genau das ist hier passiert.
+     *
+     * Ablauf laut docs/TNC-INIT.md:
+     *   1. Puffer leeren und Hostmode verlassen
+     *   2. ESC @K (1B 40 4B) betritt KISS - bewusst OHNE \r, damit die
+     *      Sequenz nicht als Textzeile verstanden wird
+     */
+    {
+        char e2[128];
+        static const unsigned char flush[] = { 0x11, 0x18 };
+        (void)pr_serial_write(&t->ser, flush, sizeof flush, e2, sizeof e2);
+        usleep(150000);
+
+        unsigned char nuls[300];
+        memset(nuls, 0, sizeof nuls);
+        (void)pr_serial_write(&t->ser, nuls, sizeof nuls, e2, sizeof e2);
+        usleep(150000);
+
+        static const unsigned char jhost[] = {
+            0x00, 0x01, 0x06, 'J', 'H', 'O', 'S', 'T', ' ', '0', '\r'
+        };
+        (void)pr_serial_write(&t->ser, jhost, sizeof jhost, e2, sizeof e2);
+        usleep(300000);
+
+        /* KISS betreten */
+        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
+        (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+        usleep(200000);
+
+        /* Reste aus dem Umschalten verwerfen */
+        unsigned char junk[256];
+        (void)pr_serial_read_quiet(&t->ser, junk, sizeof junk, 250, 100,
+                                   e2, sizeof e2);
+    }
+
     if (pr_state_load(cfg, &t->st, err, errlen) != 0) {
         pr_serial_close(&t->ser);
         free(t);
@@ -468,8 +509,20 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         return -1;
     }
 
-    if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0)
+    if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0) {
+        t->st.ptt = false;
+        t->st.rx_muted = false;
         return -1;
+    }
+
+    /*
+     * Bei KISS ist die Sendung mit dem Rahmen abgeschlossen - das TNC
+     * schaltet selbst und laesst wieder los. Der Zustand wird deshalb
+     * sofort freigegeben, sonst steht nach dem Test ein Sendezustand,
+     * den es gar nicht gibt.
+     */
+    t->st.ptt = false;
+    t->st.rx_muted = false;
 
     tnc2_note(r, PR_MSG_TX, r->cfg->callerid,
               "[Pruef-Trager ohne Inhalt]");
