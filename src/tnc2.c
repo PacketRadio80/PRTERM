@@ -177,7 +177,17 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
 
     r->impl = t;
 
-    tnc2_note(r, PR_MSG_SYS, "SYS", "TNC2 angebunden (KISS)");
+    /*
+     * Nur beim ALLERERSTEN Start melden. Der Port wird bei jedem
+     * CGI-Aufruf neu geoeffnet - eine Meldung pro Aufruf wuerde das
+     * Terminal fluten. Es ist Rauschen, kein Status.
+     */
+    {
+        char state_file[640];
+        pr_state_path(cfg, state_file, sizeof state_file);
+        if (!pr_file_exists(state_file))
+            tnc2_note(r, PR_MSG_SYS, "SYS", "TNC2 angebunden (KISS)");
+    }
     return 0;
 }
 

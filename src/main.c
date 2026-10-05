@@ -52,6 +52,32 @@ static void find_ini(int argc, char **argv, char *dst, size_t dstlen)
         return;
     }
 
+    /*
+     * Neben dem CGI. Das ist im Webbetrieb die verlaessliche Adresse:
+     * der Webserver hat ein anderes Arbeitsverzeichnis als der Aufrufer,
+     * und eine dort liegende prterm.ini wuerde sonst den Vorrang haben.
+     */
+    {
+        /*
+         * SCRIPT_FILENAME setzen nicht alle Webserver. PATH_TRANSLATED
+         * ist bei CGI zuverlaessiger gesetzt - beide werden versucht.
+         */
+        const char *sf = getenv("SCRIPT_FILENAME");
+        if (sf == NULL || sf[0] == '\0')
+            sf = getenv("PATH_TRANSLATED");
+        if (sf != NULL && sf[0] != '\0') {
+            char base[512];
+            pr_strlcpy(base, sf, sizeof base);
+            char *slash = strrchr(base, '/');
+            if (slash != NULL) {
+                *slash = '\0';
+                snprintf(dst, dstlen, "%.480s/prterm.ini", base);
+                if (pr_file_exists(dst))
+                    return;
+            }
+        }
+    }
+
     if (pr_file_exists("prterm.ini")) {
         pr_strlcpy(dst, "prterm.ini", dstlen);
         return;

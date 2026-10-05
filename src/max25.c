@@ -381,7 +381,14 @@ static int max25_open(pr_rig *r, char *err, size_t errlen)
     }
 
     r->impl = m;
-    max25_note(r, PR_MSG_SYS, "SYS", "MAX25-Stack angebunden (M25/1)");
+
+    /* Nur beim ersten Start melden - siehe Kommentar in tnc2.c. */
+    {
+        char state_file[640];
+        pr_state_path(cfg, state_file, sizeof state_file);
+        if (!pr_file_exists(state_file))
+            max25_note(r, PR_MSG_SYS, "SYS", "MAX25-Stack angebunden (M25/1)");
+    }
     return 0;
 }
 

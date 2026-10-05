@@ -620,7 +620,8 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
 /* ======================================================================= */
 
 static void json_state(pr_response *res, const app *a, const pr_config *cfg,
-                       const pr_session *sess, const pr_msg *msgs, size_t nmsg)
+                       const pr_session *sess, const pr_msg *msgs, size_t nmsg,
+                       bool rig_started)
 {
     pr_response_json(res, 200);
     pr_buf *b = &res->body;
@@ -640,6 +641,10 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
     json_kv_int(b, "tx_count", a->st.tx_count);
     json_kv_str(b, "device", a->st.device);
     json_kv_bool(b, "link_ok", a->st.link_ok);
+    /* Grund, warum das Rig nicht hochgekommen ist - ohne das bleibt das
+     * Problem unsichtbar: die Seite rendert, aber nichts funktioniert. */
+    if (!rig_started && a->err[0] != '\0')
+        json_kv_str(b, "rig_error", a->err);
 
     pr_buf_add(b, ",\"messages\":[");
     for (size_t i = 0; i < nmsg; i++) {
@@ -763,7 +768,11 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         if (strcmp(action, "set") == 0) {
             char err[256];
+            err[0] = '\0';
             bool ok = rig_started;
+
+            if (!ok)
+                pr_strlcpy(err, a.err, sizeof err);
 
             /* Zielzustand erst vollstaendig bestimmen, dann pruefen,
              * dann anwenden. Sonst faellt eine ungültige Kombination wie
@@ -914,7 +923,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         /* neue Nachrichten seit dem letzten Abruf waeren besser, aber ein
          * kurzes Fenster reicht fuer die Anzeige */
         size_t from = nmsg > 12 ? nmsg - 12 : 0;
-        json_state(res, &a, cfg, &sess, msgs + from, nmsg - from);
+        json_state(res, &a, cfg, &sess, msgs + from, nmsg - from, rig_started);
         app_stop(&a);
         return 0;
     }
