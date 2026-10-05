@@ -90,7 +90,7 @@ static void on_signal(int sig)
  * Kontrollrahmen und geht NICHT auf die Luft. Erst danach darf man
  * Kommandos schreiben - sonst sendet man selbst.
  */
-static bool enter_kiss(tncd_station *st, char *err, size_t errlen)
+static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
 {
     char e2[128];
     (void)errlen;
@@ -147,51 +147,38 @@ static bool enter_kiss(tncd_station *st, char *err, size_t errlen)
                                    e2, sizeof e2);
     }
 
-    /* 5. KISS betreten */
+    /*
+     * 5. Dauerkommandomodus.
+     *
+     * KISS wird bewusst NICHT betreten. Wer KISS betritt, muss es zum
+     * Senden wieder verlassen - und genau dieser Aus- und Wiedereinstieg
+     * ist es, der bei TheFirmware den Firmware-Ruecksetz ausloest und
+     * damit das Startmuster in den LEDs.
+     *
+     * Stattdessen:
+     *   Senden  -> UNPROTO <Ziel> 0 <Text>
+     *   Empfang -> Monitortext
+     * Damit muss das Geraet nie umgeschaltet werden, und ein Ruecksetz
+     * bleibt die Ausnahme statt die Regel.
+     */
     {
-        if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
-            static const unsigned char kiss_on[] = {
-                'k','i','s','s',' ','o','n','\r'
-            };
-            (void)pr_serial_write(&st->ser, kiss_on, sizeof kiss_on,
-                                  e2, sizeof e2);
-        } else {
-            static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
-            (void)pr_serial_write(&st->ser, kiss_on, sizeof kiss_on,
-                                  e2, sizeof e2);
-        }
-        usleep(250000);
-
+        static const unsigned char mon[] = "MONITOR ON\r";
+        (void)pr_serial_write(&st->ser, mon, sizeof mon - 1, e2, sizeof e2);
+        usleep(300000);
         unsigned char junk[256];
-        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 250, 100,
+        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 300, 150,
+                                   e2, sizeof e2);
+    }
+    {
+        static const unsigned char mall[] = "MALL ON\r";
+        (void)pr_serial_write(&st->ser, mall, sizeof mall - 1, e2, sizeof e2);
+        usleep(300000);
+        unsigned char junk[256];
+        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 300, 150,
                                    e2, sizeof e2);
     }
 
-    /*
-     * 6. KISS-Parameter setzen. Werte wie im CB-Betrieb ueblich:
-     *    TXDELAY 50  - PTT-Vorlauf in 10ms-Schritten
-     *    PERSIST 255 - immer senden, kein ALOHA-Zufall (Sondernutzung)
-     *    SLOTTIME 10 - Sperrzeit
-     *    TXTAIL 1    - PTT-Nachlauf
-     *    FULLDUPLEX 0
-     */
-    {
-        static const struct { unsigned char cmd, val; } kp[] = {
-            { 0x01, 50 },   /* TXDELAY  */
-            { 0x02, 255 },  /* PERSIST  */
-            { 0x03, 10 },   /* SLOTTIME */
-            { 0x04, 1 },    /* TXTAIL   */
-            { 0x05, 0 }     /* FULLDUPLEX */
-        };
-        for (size_t i = 0; i < sizeof kp / sizeof kp[0]; i++) {
-            unsigned char f[6];
-            f[0] = 0xC0; f[1] = kp[i].cmd; f[2] = kp[i].val; f[3] = 0xC0;
-            (void)pr_serial_write(&st->ser, f, 4, e2, sizeof e2);
-        }
-        usleep(200000);
-    }
-
-    st->kiss_ok = true;
+    st->kiss_ok = true;   /* hier: Betriebsbereit, nicht KISS */
     st->last_check = time(NULL);
     if (err) err[0] = '\0';
     return true;
@@ -286,50 +273,17 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
     tx_prepare(&st->ser);
 
     /*
-     * 1. KISS verlassen.
-     *
-     * ACHTUNG: C0 FF C0 setzt bei TheFirmware die FIRMWARE zurueck -
-     * das ist der Grund, warum dabei der Banner erscheint und die LEDs
-     * Status/Connected das Startmuster zeigen (2-3 Sekunden, siehe
-     * Landolt-Handbuch). Nach dem Ruecksetz ist MYCALL weg, und
-     * UNPROTO wuerde mit einer falschen Kennung senden.
-     *
-     * Darum: ausreichend warten UND die Kennung erneut setzen.
+     * Das Geraet steht dauerhaft im Kommandomodus - es muss nichts
+     * umgeschaltet und damit auch nichts zurueckgesetzt werden.
+     * Nur die Kennung setzen wir sicherheitshalber.
      */
-    static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
-    (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
-
-    /*
-     * Warten, bis der Startvorgang WIRKLICH vorbei ist.
-     *
-     * Starr 3 Sekunden zu warten war zu wenig: der Banner laeuft dann
-     * noch, und MYCALL/UNPROTO gingen mitten im Booten raus - das TNC
-     * hat sie nicht verarbeitet, und es kam keine Sendung zustande.
-     * Besser: den Auslauf abwarten, bis eine Weile nichts mehr kommt.
-     */
-    {
-        unsigned char boot[2048];
-        long total = 0;
-        for (int round = 0; round < 12; round++) {
-            long got = pr_serial_read_quiet(&st->ser, boot, sizeof boot,
-                                           1000, 350, e2, sizeof e2);
-            if (got <= 0)
-                break;
-            total += got;
-        }
-        (void)total;
-    }
-    usleep(500000);
-
-    /* 2. MYCALL wieder setzen - sonst sendet UNPROTO mit der falschen
-     *    Kennung auf die Luft. */
     {
         char myc[32];
         snprintf(myc, sizeof myc, "%.1sI %.9s\r", "\x1b", st->cfg.callerid);
         (void)pr_serial_write(&st->ser, myc, strlen(myc), e2, sizeof e2);
-        usleep(400000);
+        usleep(300000);
         unsigned char jj[128];
-        (void)pr_serial_read_quiet(&st->ser, jj, sizeof jj, 400, 150, e2, sizeof e2);
+        (void)pr_serial_read_quiet(&st->ser, jj, sizeof jj, 300, 150, e2, sizeof e2);
     }
 
     /* 3. UNPROTO <Ziel> 0 <Text> */
@@ -346,24 +300,15 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
     /* 4. abwarten, bis das TNC gesendet hat */
     usleep(1200000);
 
-    /* 5. KISS wieder betreten (inkl. Parameter) */
-    {
-        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
-        if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
-            static const unsigned char ko[] = { 'k','i','s','s',' ','o','n','\r' };
-            (void)pr_serial_write(&st->ser, ko, sizeof ko, e2, sizeof e2);
-        } else {
-            (void)pr_serial_write(&st->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
-        }
-        usleep(300000);
-        static const struct { unsigned char cmd, val; } kp[] = {
-            { 0x01, 50 }, { 0x02, 255 }, { 0x03, 10 }, { 0x04, 1 }, { 0x05, 0 }
-        };
-        for (size_t i = 0; i < sizeof kp / sizeof kp[0]; i++) {
-            unsigned char f[4] = { 0xC0, kp[i].cmd, kp[i].val, 0xC0 };
-            (void)pr_serial_write(&st->ser, f, 4, e2, sizeof e2);
-        }
-    }
+    /*
+     * BEWUSST kein KISS-Wiedereinstieg.
+     *
+     * Das Geraet steht dauerhaft im Kommandomodus. Wuerde man am Ende
+     * ESC @K schicken, stuende das Geraet beim naechsten Senden wieder
+     * im KISS - und "UNPROTO ..." ginge als Daten auf die Luft statt
+     * als Befehl. Genau das liess die erste Sendung funktionieren und
+     * alle folgenden scheitern.
+     */
     return 0;
 }
 
@@ -434,7 +379,7 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             return;
         }
         char err[256];
-        if (pr_str_eq_ci(st->cfg.tx_mode, "unproto")) {
+        {
             if (send_unproto(st, data, n, err, sizeof err) != 0) {
                 answer(fd, "ERR %.200s", err);
                 return;
@@ -482,7 +427,7 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             return;
         }
         char err[256];
-        if (!enter_kiss(st, err, sizeof err)) {
+        if (!enter_command_mode(st, err, sizeof err)) {
             answer(fd, "ERR %.200s", err);
             return;
         }
@@ -608,7 +553,7 @@ static int run_daemon(tncd_station *stations, size_t nst)
                 continue;
             time_t idle = time(NULL) - st->last_check;
             if (idle > 600 && st->rx_len == 0) {
-                (void)enter_kiss(st, err, sizeof err);
+                (void)enter_command_mode(st, err, sizeof err);
             }
         }
     }
@@ -689,7 +634,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "FEHLER %s: %s\n", st->name, err);
             continue;
         }
-        if (!enter_kiss(st, err, sizeof err)) {
+        if (!enter_command_mode(st, err, sizeof err)) {
             fprintf(stderr, "FEHLER %s: %s\n", st->name, err);
             pr_serial_close(&st->ser);
             continue;

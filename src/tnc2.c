@@ -50,6 +50,9 @@ typedef struct tnc2_impl {
 
     bool         in_kiss;
     char         mycall[16];
+    /* Monitortext: der Daemon liefert Zeilen, keine KISS-Rahmen */
+    char         line[512];
+    size_t       line_len;
     /*
      * Name der Station, zu der dieses Geraet gehoert. Beim Oeffnen aus
      * der Konfiguration uebernommen, damit jede empfangene Nachricht ihr
@@ -84,66 +87,55 @@ static void tnc2_save(pr_rig *r, tnc2_impl *t)
 /* Aufnehmen einer empfangenen Nachricht                                   */
 /* ======================================================================= */
 
-static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
-                         const char *text, int db)
+
+/*
+ * Eine Monitorzeile auswerten. Format der TNC2-Klasse:
+ *
+ *     FROM>TO:text
+ *
+ * Zeilen ohne diese Form sind Bedienhinweise des TNC und werden
+ * verworfen. Bewusst tolerant: lieber eine Zeile weniger als eine
+ * falsch zugeordnete.
+ */
+static void tnc2_handle_monitor(tnc2_impl *t, char *line)
 {
+    char *gt = strchr(line, '>');
+    char *colon = gt ? strchr(gt, ':') : NULL;
+    if (gt == NULL || colon == NULL)
+        return;
+
+    char from[PR_CALLSIGN_MAX], to[PR_CALLSIGN_MAX];
+    size_t fl = (size_t)(gt - line);
+    size_t tl = (size_t)(colon - gt) - 1;
+    if (fl == 0 || fl >= sizeof from || tl == 0 || tl >= sizeof to)
+        return;
+
+    memcpy(from, line, fl);
+    from[fl] = '\0';
+    memcpy(to, gt + 1, tl);
+    to[tl] = '\0';
+
+    pr_msg m;
+    memset(&m, 0, sizeof m);
+    m.kind = PR_MSG_RX;
+    pr_strlcpy(m.from, from, sizeof m.from);
+    pr_strlcpy(m.to, to, sizeof m.to);
+    pr_strlcpy(m.station, t->station, sizeof m.station);
+    pr_strlcpy(m.text, colon + 1, sizeof m.text);
+    m.db = t->st.rx_db;
+    m.ts = pr_now_s();
+
     if (t->npending >= TNC2_MAX_PENDING) {
         memmove(&t->pending[0], &t->pending[1],
                 (TNC2_MAX_PENDING - 1) * sizeof t->pending[0]);
         t->npending = TNC2_MAX_PENDING - 1;
     }
-
-    pr_msg *m = &t->pending[t->npending++];
-    memset(m, 0, sizeof *m);
-    m->kind = PR_MSG_RX;
-    pr_strlcpy(m->from, from, sizeof m->from);
-    if (to != NULL)
-        pr_strlcpy(m->to, to, sizeof m->to);
-    /* Welches Geraet hat es aufgefangen - damit "All" die Herkunft zeigt. */
-    pr_strlcpy(m->station, t->station, sizeof m->station);
-    pr_strlcpy(m->text, text, sizeof m->text);
-    m->db = db;
-    m->ts = pr_now_s();
+    t->pending[t->npending++] = m;
 }
 
-/*
- * Zerlegt einen empfangenen AX.25-Rahmen und erzeugt daraus eine
- * Nachricht. UI-Rahmen tragen die Information nach Control+PID.
- */
-static void tnc2_handle_frame(tnc2_impl *t, const unsigned char *frame, size_t len)
-{
-    /* Adressfelder: Ziel (7), Quelle (7), dann Control, PID */
-    if (len < 16)
-        return;
 
-    char to[16], from[16];
-    if (!call_from_ax25(frame, to, sizeof to))
-        return;
-    if (!call_from_ax25(frame + 7, from, sizeof from))
-        return;
+/* tnc2_handle_frame entfaellt: im Kommandomodus kommt Monitortext. */
 
-    unsigned char ctrl = frame[14];
-    unsigned char pid  = frame[15];
-
-    /* Nur UI-Rahmen sind hier interessant */
-    if (ctrl != 0x03u)
-        return;
-    if (pid != 0xF0u)
-        return;
-
-    char text[PR_MSG_TEXT];
-    size_t n = len - 16;
-    if (n >= sizeof text)
-        n = sizeof text - 1;
-    memcpy(text, frame + 16, n);
-    text[n] = '\0';
-
-    tnc2_push_rx(t, to, from, text, t->st.rx_db);
-    t->st.rx_count++;
-    pr_strlcpy(t->st.last_rx_from, from, sizeof t->st.last_rx_from);
-    pr_strlcpy(t->st.last_rx_text, text, sizeof t->st.last_rx_text);
-    t->st.last_rx_ts = pr_now_s();
-}
 
 /* ======================================================================= */
 /* VTable                                                                  */
@@ -268,12 +260,26 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
         return -1;
 
     if (n > 0) {
-        size_t frames = kiss_decoder_feed_buf(&t->dec, buf, (size_t)n);
-        for (size_t i = 0; i < frames; i++) {
-            unsigned char frame[1024];
-            size_t flen = kiss_decoder_take(&t->dec, frame, sizeof frame);
-            if (flen > 0)
-                tnc2_handle_frame(t, frame, flen);
+        /*
+         * Der Daemon steht dauerhaft im Kommandomodus - empfangen
+         * geschieht ueber den Monitortext, nicht ueber KISS-Rahmen.
+         * Format der TNC2-Klasse:
+         *     FROM>TO:text
+         * Alles andere (Prompts, Meldungen) wird verworfen.
+         */
+        for (long i = 0; i < n; i++) {
+            char c = (char)buf[i];
+            if (c == '\r')
+                continue;
+            if (c == '\n') {
+                t->line[t->line_len] = '\0';
+                if (t->line_len > 0)
+                    tnc2_handle_monitor(t, t->line);
+                t->line_len = 0;
+                continue;
+            }
+            if (t->line_len + 1 < sizeof t->line)
+                t->line[t->line_len++] = c;
         }
     }
     return 0;
