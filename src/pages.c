@@ -314,7 +314,8 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
      * allen Geraeten an und erscheint unter "All".
      */
     pr_buf_add(out,
-        "  <label class=\"call-lbl\" for=\"txdev\" title=\"Welches Ger&#228;t sendet\">"
+        "  <label class=\"call-lbl\" id=\"txdevlbl\" for=\"txdev\" "
+        "title=\"Welches Ger&#228;t sendet\">"
         "TX:</label>\n"
         "  <select id=\"txdev\" class=\"tx-dev\" title=\"Sendeger&#228;t\">");
     if (cfg->nstations > 0) {
@@ -851,6 +852,30 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             const char *text = pr_req_param(req, "text");
             const char *to   = pr_req_param(req, "to");
             char err[256];
+
+            /*
+             * Rundruf ist nur unter "All" erlaubt.
+             *
+             * Die Reiter einer einzelnen Station stehen fuer DIREKTE
+             * Kommunikation mit einem Partner. Dort muss ein Ziel
+             * angegeben sein - ein CQ von einer bestimmten Station aus
+             * wuerde bedeuten, dass diese Station allein spricht, ohne
+             * dass der Betreiber das so bestimmt hat.
+             *
+             * Die Regel steht bewusst hier und nicht im Browser: was der
+             * Server nicht prueft, haelt niemand.
+             */
+            bool bcast_ok = pr_parse_bool(pr_req_param(req, "bcast"), false);
+            bool is_bcast = (to == NULL || to[0] == '\0' ||
+                             pr_str_eq_ci(to, "CQ"));
+            if (is_bcast && !bcast_ok) {
+                json_err(res,
+                    "Rundruf ist nur unter \"All\" erlaubt - "
+                    "in den Stationsreitern bitte eine Station ansprechen");
+                app_stop(&a);
+                return 0;
+            }
+
             if (!rig_started) {
                 json_err(res, a.err);
             } else if (app_tx(&a, to, text, &sess, err, sizeof err) != 0) {

@@ -268,7 +268,22 @@
     var call = $("callto");
     var to = call ? call.value.trim().toUpperCase() : "";
 
-    post({ action: "tx", text: text, to: to }, function (j) {
+    /*
+     * Rundruf nur aus "All". In den Stationsreitern geht es um direkte
+     * Kommunikation mit einem Partner - dort muss ein Ziel stehen.
+     * Geprueft wird das auch im Server.
+     */
+    var isAll = !S.station;
+    if (!isAll && (!to || to === "CQ")) {
+      flash("In diesem Reiter bitte eine Station ansprechen \u2013 Rundruf nur unter \"All\".", "warn");
+      if (call) call.focus();
+      return;
+    }
+
+    var payload = { action: "tx", text: text, to: to };
+    if (isAll) payload.bcast = "1";
+
+    post(payload, function (j) {
       if (j && j.ok === false) flash(j.error || "Senden fehlgeschlagen", "err");
       input.value = "";
       input.focus();
@@ -447,6 +462,17 @@
         qsa("[data-station]").forEach(function (x) { x.classList.remove("is-active"); });
         b.classList.add("is-active");
         S.station = b.getAttribute("data-station") || "";
+        /* Die Geraetewahl gehoert NUR zu "All". In einem Stationsreiter
+         * gilt das Geraet des Reiters - eine Auswahl waere widerspruechlich. */
+        var dev = $("txdev");
+        var devLbl = $("txdevlbl");
+        if (dev) {
+          var isAll = !S.station;
+          dev.hidden = !isAll;
+          if (devLbl) devLbl.hidden = !isAll;
+          if (!isAll) S.txdev = S.station;
+          else S.txdev = dev.value || "";
+        }
         rerenderLog();
       });
     });
