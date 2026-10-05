@@ -365,7 +365,16 @@
     if (loginForm) {
       loginForm.addEventListener("submit", function (e) {
         e.preventDefault();
-        var u = $("loginuser").value, p = $("loginpass").value;
+        var uEl = $("loginuser"), pEl = $("loginpass");
+        if (!uEl || !pEl) {
+          flash("Formular unvollständig - bitte neu laden", "err");
+          return;
+        }
+        var u = uEl.value, p = pEl.value;
+        if (!u || !p) {
+          flash("Benutzer und Passwort eingeben", "warn");
+          return;
+        }
         post({ action: "login", user: u, pass: p }, function (j) {
           if (j && j.ok) {
             closeLogin();

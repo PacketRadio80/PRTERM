@@ -186,9 +186,32 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     /* Status */
     pr_buf_add(out, "  <div class=\"status\">\n");
 
-    pr_buf_add(out, "    <span class=\"chip\"><b>CallerID</b> <span class=\"num\">");
-    pr_html_escape(out, cfg->callerid);
-    pr_buf_add(out, "</span></span>\n");
+    /*
+     * Stationsreiter: <Frequenz>@<Funk-Baudrate>, ausgelesen aus der INI.
+     * Bewusst kein Gerätepfad und kein Rufzeichen - der Pfad ist
+     * installationsabhaengig, das Rufzeichen steht im Adminbereich.
+     */
+    pr_buf_add(out, "    <nav class=\"station-tabs\" id=\"station-tabs\">\n");
+    if (cfg->nstations > 0) {
+        for (size_t k = 0; k < cfg->nstations; k++) {
+            const pr_station *sta = &cfg->stations[k];
+            if (!sta->enabled)
+                continue;
+            pr_buf_addf(out,
+                "      <button type=\"button\" class=\"stab%s\" data-station=\"%s\">"
+                "%.3f@%ld</button>\n",
+                k == 0 ? " is-current" : "",
+                sta->name,
+                cfg->freq_hz / 1000000.0,
+                sta->radio_baud);
+        }
+    } else {
+        pr_buf_addf(out,
+            "      <button type=\"button\" class=\"stab is-current\">"
+            "%.3f@%ld</button>\n",
+            cfg->freq_hz / 1000000.0, cfg->radio_baud);
+    }
+    pr_buf_add(out, "    </nav>\n");
 
     pr_buf_add(out, "    <span class=\"chip\"><b>QRG</b> <span class=\"num\" id=\"s-freq\">");
     pr_buf_addf(out, "%.3f MHz", st->freq_hz / 1000000.0);
@@ -211,11 +234,6 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
         st->duplex == PR_DUPLEX_FULL ? "is-duplex-full" : "is-duplex-half",
         st->duplex == PR_DUPLEX_FULL ? "FULL-DUPLEX" : "HALB-DUPLEX");
 
-    pr_buf_addf(out,
-        "    <span class=\"chip %s\" id=\"s-link\">%s</span>\n",
-        st->link_ok ? "is-link-ok" : "is-link-bad",
-        st->link_ok ? st->device : "getrennt");
-
     pr_buf_add(out, "  </div>\n");
 
     /* Navigation */
@@ -234,24 +252,14 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
 static void render_terminal(pr_buf *out, const pr_config *cfg,
                             const pr_rig_state *st)
 {
+    (void)cfg;
     pr_buf_add(out, "<section class=\"view is-active\" data-view=\"terminal\">\n");
 
-    /* Kanalraster */
-    pr_buf_add(out, "<div class=\"card\" style=\"flex:0 0 auto\">\n");
-    pr_buf_add(out, "<div class=\"channels\">");
-    if (cfg->bandplan != NULL) {
-        for (size_t i = 0; i < cfg->bandplan->nch; i++) {
-            const pr_channel *c = &cfg->bandplan->ch[i];
-            bool cur = (c->freq_hz == st->freq_hz);
-            pr_buf_addf(out,
-                "<div class=\"ch%s%s%s\" data-ch=\"%d\" title=\"%.3f MHz\">%d</div>",
-                cur ? " is-current" : "",
-                (c->flags & PR_CH_F_GATEWAY) ? " is-gw" : "",
-                (c->flags & PR_CH_F_DATA) ? " is-data" : "",
-                c->num, c->freq_hz / 1000000.0, c->num);
-        }
-    }
-    pr_buf_add(out, "</div>\n</div>\n");
+    /*
+     * Bewusst KEINE Kanalleiste hier. Die Bedienung gehoert ins Terminal,
+     * die Kanalwahl in den Adminbereich - sonst frisst das Raster den
+     * Platz, der fuer Nachrichten sein soll.
+     */
 
     /* Empfangslog */
     pr_buf_add(out,
@@ -304,7 +312,7 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
 /* ======================================================================= */
 
 static void render_admin(pr_buf *out, const pr_config *cfg,
-                         const pr_session *sess)
+                         const pr_session *sess, const pr_rig_state *st)
 {
     pr_buf_add(out, "<section class=\"view\" data-view=\"admin\">\n");
 
@@ -403,6 +411,25 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "<div class=\"card-actions\">"
                     "<button type=\"submit\" class=\"primary\">Speichern</button>"
                     "</div></form>\n");
+
+    /* --- Kanalwahl --- */
+    pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Kanalwahl</h2>\n");
+    pr_buf_add(out, "<div class=\"channels\">");
+    if (cfg->bandplan != NULL) {
+        for (size_t k = 0; k < cfg->bandplan->nch; k++) {
+            const pr_channel *c = &cfg->bandplan->ch[k];
+            bool cur = (c->freq_hz == st->freq_hz);
+            pr_buf_addf(out,
+                "<div class=\"ch%s%s%s\" data-ch=\"%d\" title=\"%.3f MHz\">%d</div>",
+                cur ? " is-current" : "",
+                (c->flags & PR_CH_F_GATEWAY) ? " is-gw" : "",
+                (c->flags & PR_CH_F_DATA) ? " is-data" : "",
+                c->num, c->freq_hz / 1000000.0, c->num);
+        }
+    }
+    pr_buf_add(out, "</div>\n"
+        "<p class=\"hint\">Kanal anklicken zum Umschalten. "
+        "<b>&#8727;</b> Gateway &#183; <b>&#9632;</b> Daten</p></div>\n");
 
     /* --- Bans --- */
     pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Gesperrte Stationen</h2>\n");
@@ -520,8 +547,10 @@ static void render_login(pr_buf *out, const pr_session *sess)
         "padding:18px 20px;min-width:min(340px,90vw)\">\n"
         "<form id=\"loginform\" method=\"post\" action=\"\">\n"
         "<h2 class=\"grad\" style=\"margin-top:0\">Anmeldung</h2>\n"
-        "<div id=\"loginmsg\" class=\"note note-err\" hidden></div>\n");
-    html_input_text(out, "user", "", "admin", "Benutzer", "");
+        "<div id=\"loginmsg\" class=\"note note-err\" hidden></div>\n"
+        "<div class=\"field\"><label>Benutzer</label>"
+        "<input type=\"text\" id=\"loginuser\" name=\"user\" value=\"\" "
+        "placeholder=\"admin\" autocomplete=\"off\" spellcheck=\"false\"></div>\n");
     pr_buf_add(out, "<div class=\"field\"><label>Passwort</label>"
                     "<input type=\"password\" id=\"loginpass\" name=\"pass\" "
                     "autocomplete=\"current-password\"></div>\n");
@@ -552,7 +581,7 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
         html_note(out, flash_kind != NULL ? flash_kind : "info", "%s", flash_msg);
 
     render_terminal(out, cfg, st);
-    render_admin(out, cfg, sess);
+    render_admin(out, cfg, sess, st);
     pr_buf_add(out, "</main>\n</div>\n");
 
     render_login(out, sess);
