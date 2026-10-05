@@ -422,6 +422,15 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             return;
         }
         tx_prepare(&st->ser);
+        /*
+         * PERSIST vor JEDEM Rahmen erneut setzen - so macht es der
+         * MAX25-Stack. Gehen die Parameter verloren (etwa nach einem
+         * ungewollten Ruecksetz), waere sonst die Sendung unzuverlaessig.
+         */
+        {
+            unsigned char pf[4] = { 0xC0, 0x02, 255, 0xC0 };
+            (void)pr_serial_write(&st->ser, pf, 4, err, sizeof err);
+        }
         if (pr_serial_write(&st->ser, data, n, err, sizeof err) != 0) {
             answer(fd, "ERR %.200s", err);
             return;
