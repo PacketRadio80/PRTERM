@@ -27,6 +27,41 @@ const char *pr_test_status_name(int status)
     }
 }
 
+/*
+ * Den lesbaren Teil eines Puffers anzeigen.
+ *
+ * Die Ruecksetzfolge hinterlaesst NULs und BEL vor dem eigentlichen
+ * Banner. Diese zu zeigen macht die Ausgabe irrefuehrend - es sah aus
+ * wie Muell, obwohl die Firmware sauber erkannt wurde.
+ */
+static void show_readable(char *dst, size_t dstlen,
+                          const unsigned char *src, size_t len)
+{
+    size_t start = 0;
+    while (start < len) {
+        unsigned char c = src[start];
+        if ((c >= 0x20 && c < 0x7f) || c == '\r' || c == '\n')
+            break;
+        start++;
+    }
+
+    size_t w = 0;
+    for (size_t i = start; i < len && w + 1 < dstlen; i++) {
+        unsigned char c = src[i];
+        if (c == '\r' || c == '\n') {
+            dst[w++] = ' ';
+        } else if (c >= 0x20 && c < 0x7f) {
+            dst[w++] = (char)c;
+        } else if (c == 0) {
+            size_t k = i;
+            while (k < len && src[k] == 0) k++;
+            if (k == len) break;
+        }
+    }
+    while (w > 0 && dst[w - 1] == ' ') w--;
+    dst[w] = '\0';
+}
+
 static void add(pr_selftest *st, const char *name, int status, const char *fmt, ...)
 {
     if (st->n >= PR_SELFTEST_MAX)
@@ -96,9 +131,15 @@ static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
      * laesst bei TheFirmware zusaetzlich den Banner erscheinen.
      */
     unsigned char answer[1024];
-    size_t alen = pr_probe_reset(&s, answer, sizeof answer);
+    /* Ohne Ruecksetzfolge - ein Gesundheits-Check veraendert nichts. */
+    size_t alen = 0;
 
-    static const char *const probes[] = { "\r", "\x1b" "V\r" };
+    /*
+     * Bewusst NUR ESC V. Ein vorgeschicktes "\r" hat bei TheFirmware
+     * dazu gefuehrt, dass die Antwort nicht mehr ankam - der direkte
+     * Aufruf mit ESC V allein funktionierte dagegen zuverlaessig.
+     */
+    static const char *const probes[] = { "\x1b" "V\r" };
     for (size_t i = 0; i < sizeof probes / sizeof probes[0]; i++) {
         (void)pr_serial_write(&s, probes[i], strlen(probes[i]), err, sizeof err);
         usleep(400000);
@@ -124,12 +165,10 @@ static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
     add(st, "Gerät antwortet", PR_TEST_PASS, "%u Byte(s) Antwort", (unsigned)alen);
 
     if (pr_probe_has_banner(answer, alen)) {
-        char show[96];
-        size_t k = alen < sizeof show - 1 ? alen : sizeof show - 1;
-        memcpy(show, answer, k);
-        show[k] = '\0';
+        char show[128];
+        show_readable(show, sizeof show, answer, alen);
         pr_strlcpy(st->firmware, show, sizeof st->firmware);
-        add(st, "Firmware", PR_TEST_PASS, "%.90s", show);
+        add(st, "Firmware", PR_TEST_PASS, "%.110s", show);
     } else {
         add(st, "Firmware", PR_TEST_WARN,
             "kein Banner erkannt - Geraet spricht, ist aber unbekannt");
@@ -240,12 +279,10 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
         add(out, "Nach dem Reset", PR_TEST_FAIL,
             "immer noch keine Antwort - Netzteil trennen und neu einschalten");
     } else if (pr_probe_has_banner(answer, alen)) {
-        char show[96];
-        size_t k = alen < sizeof show - 1 ? alen : sizeof show - 1;
-        memcpy(show, answer, k);
-        show[k] = '\0';
+        char show[128];
+        show_readable(show, sizeof show, answer, alen);
         pr_strlcpy(out->firmware, show, sizeof out->firmware);
-        add(out, "Nach dem Reset", PR_TEST_PASS, "%.90s", show);
+        add(out, "Nach dem Reset", PR_TEST_PASS, "%.110s", show);
     } else {
         add(out, "Nach dem Reset", PR_TEST_WARN,
             "Geraet spricht, aber ohne Banner");
