@@ -392,6 +392,11 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
   color: var(--ink-2, #4a5b78);
   padding-right: 2px;
 }
+.txbar .tx-dev {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  font-variant-numeric: tabular-nums;
+}
 .txbar .call-input {
   flex: 0 0 5.5em;
   min-width: 5.5em;

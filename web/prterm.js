@@ -12,7 +12,8 @@
      ---------------------------------------------------------------------- */
   var S = {
     view: "terminal",
-    station: "",
+    station: "",    /* nur EMPFANGS-Filter, Reiter links */
+    txdev: "",      /* nur SENDEGERAET, Auswahl in der Sendezeile */
     since: 0,
     msgs: [],
     callerid: "",
@@ -221,7 +222,11 @@
     /* Die aktive Station bestimmt, mit WELCHER Hardware gearbeitet wird.
      Jeder Reiter steht fuer eine vollstaendige Station. */
   function withStation(data) {
-    if (S.station) data.station = S.station;
+    /* Senden laeuft ueber das gewaehlte Geraet, NICHT ueber den
+     * Empfangsfilter. Beide sind unabhaengig - 1200 und 2400 Baud
+     * verstehen einander nicht, wer sendet, waehlt man ausdruecklich. */
+    if (S.txdev) data.station = S.txdev;
+    else if (S.station) data.station = S.station;
     /* CSRF-Token mitschicken. Ohne das schlagen alle fetch-Aktionen
      * bei angemeldeten Nutzern mit "Token ungueltig" fehl. */
     var meta = document.querySelector('meta[name="csrf"]');
@@ -423,6 +428,15 @@
         sendText();
       });
     }
+    /* Sendegeraet - nur fuer das Senden, Empfang bleibt unter "All" */
+    var txdev = $("txdev");
+    if (txdev) {
+      S.txdev = txdev.value || "";
+      txdev.addEventListener("change", function () {
+        S.txdev = txdev.value || "";
+      });
+    }
+
     var ptt = $("ptttest");
     if (ptt) ptt.addEventListener("click", pttTest);
 

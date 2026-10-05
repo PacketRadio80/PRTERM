@@ -303,7 +303,37 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
         "CALL:</label>\n"
         "  <input class=\"call-input\" type=\"text\" id=\"callto\" name=\"callto\" "
         "placeholder=\"CQ\" maxlength=\"9\" spellcheck=\"false\" "
-        "autocapitalize=\"characters\" autocomplete=\"off\">\n"
+        "autocapitalize=\"characters\" autocomplete=\"off\">\n");
+
+    /*
+     * Sendegeraet - ein reines AUSWAHLMENUE FUER DAS SENDEN.
+     *
+     * 1200 und 2400 Baud verstehen einander nicht: das sind verschiedene
+     * Modems. Wer sendet, muss man sich darum ausdruecklich aussuchen.
+     * Empfang wird dadurch NICHT beeinflusst - der kommt weiterhin auf
+     * allen Geraeten an und erscheint unter "All".
+     */
+    pr_buf_add(out,
+        "  <label class=\"call-lbl\" for=\"txdev\" title=\"Welches Ger&#228;t sendet\">"
+        "TX:</label>\n"
+        "  <select id=\"txdev\" class=\"tx-dev\" title=\"Sendeger&#228;t\">");
+    if (cfg->nstations > 0) {
+        for (size_t k = 0; k < cfg->nstations; k++) {
+            const pr_station *sta = &cfg->stations[k];
+            if (!sta->enabled)
+                continue;
+            pr_buf_addf(out, "<option value=\"%s\"%s>%s (%ld)</option>",
+                        sta->name,
+                        k == 0 ? " selected" : "",
+                        sta->name, sta->radio_baud);
+        }
+    } else {
+        pr_buf_addf(out, "<option value=\"\">%ld Baud</option>",
+                    cfg->radio_baud);
+    }
+    pr_buf_add(out, "</select>\n");
+
+    pr_buf_add(out,
         "  <input class=\"tx-input\" type=\"text\" id=\"txtext\" name=\"text\" "
         "placeholder=\"Nachricht eingeben &#8230;  [Enter] senden\" "
         "enterkeyhint=\"send\" spellcheck=\"false\">\n"
