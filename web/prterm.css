@@ -349,6 +349,12 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 .ln { display: block; }
 .ln .t   { color: var(--fg-faint); }
 .ln .who { font-weight: 600; }
+/* Welches Geraet die Nachricht aufgefangen hat - steht nur in "All". */
+.ln .dev {
+  color: var(--accent);
+  font-size: .88em;
+  letter-spacing: .02em;
+}
 .ln-rx .who { color: var(--rx); }
 .ln-tx .who { color: var(--tx); }
 .ln-sys     { color: var(--fg-dim); font-style: italic; }

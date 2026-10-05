@@ -477,6 +477,7 @@ const pr_station *pr_config_apply_station(pr_config *cfg, const char *name)
     pr_strlcpy(cfg->serial_line, st->serial_line, sizeof cfg->serial_line);
     pr_strlcpy(cfg->rig_driver, st->rig_driver, sizeof cfg->rig_driver);
     pr_strlcpy(cfg->callerid, st->callerid, sizeof cfg->callerid);
+    pr_strlcpy(cfg->active_station, st->name, sizeof cfg->active_station);
     return st;
 }
 

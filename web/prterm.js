@@ -14,6 +14,8 @@
     view: "terminal",
     station: "",
     since: 0,
+    msgs: [],
+    callerid: "",
     loggedIn: false,
     cols: 0,
     rows: 0,
@@ -94,6 +96,27 @@
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  /*
+   * Zwei Sichten auf dieselben Nachrichten:
+   *
+   *   All            alles, was auf dem Kanal faellt - jeder Rundspruch,
+   *                  jedes fremde Gespraech. Gebannte Stationen bleiben
+   *                  draussen (filtert bereits der Server).
+   *   Frequenz@Baud  nur, was an DIESE Station adressiert ist.
+   *
+   * In "All" steht bei jeder Nachricht das Geraet, das sie aufgefangen
+   * hat - sonst waeren mehrere TNCs auf einem Kanal nicht zu unterscheiden.
+   */
+  function msgVisible(m) {
+    /* System- und eigene Meldungen immer */
+    if (m.kind !== "R") return true;
+    if (!S.station) return true;
+    /* Stationstab: nur an mich adressiert */
+    var me = (S.callerid || "").toUpperCase();
+    var to = (m.to || "").toUpperCase();
+    return me !== "" && to === me;
+  }
+
   function renderLog(items) {
     var t = $("term");
     if (!t) return;
@@ -103,6 +126,7 @@
 
     for (var i = 0; i < items.length; i++) {
       var m = items[i];
+      if (!msgVisible(m)) continue;
       var kind = m.kind || "S";
       var cls = "ln ln-" + ({ R: "rx", T: "tx", S: "sys", W: "warn", E: "err" }[kind] || "sys");
       var time = "";
@@ -116,6 +140,9 @@
       html +=
         '<span class="' + cls + '">' +
         '<span class="t">' + time + "</span> " +
+        /* Welches Geraet hat es gefangen - nur in "All" noetig. */
+        (m.station && !S.station
+          ? '<span class="dev">@' + esc(m.station) + "</span> " : "") +
         (m.from ? '<span class="who">' + esc(m.from) + "</span> " : "") +
         '<span class="tx">' + esc(m.text) + "</span>" +
         (m.db && m.db !== 0 ? ' <span class="db">' + m.db + " dB</span>" : "") +
@@ -127,6 +154,15 @@
       while (t.childNodes.length > 900) t.removeChild(t.firstChild);
       if (stick) scrollTerm();
     }
+  }
+
+  /* Terminal vollstaendig aus dem Bestand neu aufbauen - wird beim
+   * Umschalten zwischen "All" und einer Station gebraucht. */
+  function rerenderLog() {
+    var t = $("term");
+    if (!t) return;
+    t.innerHTML = "";
+    renderLog(S.msgs);
   }
 
   function renderState(s) {
@@ -318,14 +354,18 @@
         if (!j) return;
         S.loggedIn = !!j.logged_in;
         renderState(j);
+        if (j.callerid !== undefined) S.callerid = j.callerid;
         if (j.messages && j.messages.length) {
-          renderLog(j.messages);
           /* Merken, was wir kennen - sonst haengt der Client dieselbe
            * Meldung bei jedem Abruf erneut an. */
           for (var i = 0; i < j.messages.length; i++) {
+            S.msgs.push(j.messages[i]);
             var ts = j.messages[i].ts || 0;
             if (ts > S.since) S.since = ts;
           }
+          /* Bestand begrenzen */
+          while (S.msgs.length > 900) S.msgs.shift();
+          renderLog(j.messages);
         }
         if (j.error) flash(j.error, "warn");
       })
@@ -393,7 +433,7 @@
         qsa("[data-station]").forEach(function (x) { x.classList.remove("is-active"); });
         b.classList.add("is-active");
         S.station = b.getAttribute("data-station") || "";
-        refresh(true);
+        rerenderLog();
       });
     });
 

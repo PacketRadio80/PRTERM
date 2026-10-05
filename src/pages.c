@@ -202,23 +202,34 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
      * installationsabhaengig, das Rufzeichen steht im Adminbereich.
      */
     pr_buf_add(out, "    <nav class=\"station-tabs\" id=\"station-tabs\">\n");
+    /*
+     * "All" steht vor den Stationsreitern und zeigt ALLES, was auf dem
+     * Kanal faellt - jeden Rundspruch, jedes fremde Gespraech. Nur
+     * gebannte Stationen bleiben draussen.
+     *
+     * Die Reiter daneben zeigen NUR, was an diese Station adressiert
+     * ist. Jede Nachricht in "All" nennt das Geraet, das sie
+     * aufgefangen hat.
+     */
+    pr_buf_add(out,
+        "      <button type=\"button\" class=\"stab is-active\" data-station=\"\">"
+        "All</button>\n");
     if (cfg->nstations > 0) {
         for (size_t k = 0; k < cfg->nstations; k++) {
             const pr_station *sta = &cfg->stations[k];
             if (!sta->enabled)
                 continue;
             pr_buf_addf(out,
-                "      <button type=\"button\" class=\"stab%s\" data-station=\"%s\">"
+                "      <button type=\"button\" class=\"stab\" data-station=\"%s\">"
                 "%.3f@%ld</button>\n",
-                k == 0 ? " is-active" : "",
                 sta->name,
                 cfg->freq_hz / 1000000.0,
                 sta->radio_baud);
         }
     } else {
         pr_buf_addf(out,
-            "      <button type=\"button\" class=\"stab is-active\">"
-            "%.3f@%ld</button>\n",
+            "      <button type=\"button\" class=\"stab\" "
+            "data-station=\"\">%.3f@%ld</button>\n",
             cfg->freq_hz / 1000000.0, cfg->radio_baud);
     }
     pr_buf_add(out, "    </nav>\n");
@@ -689,6 +700,9 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
     json_kv_int(b, "rx_count", a->st.rx_count);
     json_kv_int(b, "tx_count", a->st.tx_count);
     json_kv_str(b, "device", a->st.device);
+    /* Eigenes Rufzeichen - damit der Client filtern kann, was an mich
+     * adressiert ist, und was nur mitgehoerter Rundspruch. */
+    json_kv_str(b, "callerid", cfg->callerid);
     if (station != NULL) {
         json_kv_str(b, "station", station->name);
         json_kv_int(b, "radio_baud", station->radio_baud);
@@ -700,11 +714,27 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
         json_kv_str(b, "rig_error", a->err);
 
     pr_buf_add(b, ",\"messages\":[");
+    size_t nout = 0;
     for (size_t i = 0; i < nmsg; i++) {
-        if (i > 0) pr_buf_addc(b, ',');
+        /*
+         * Gebannte Stationen erscheinen in KEINER Ansicht - auch nicht
+         * unter "All". Dort wird bewusst alles mitgehoert, was auf dem
+         * Kanal faellt, aber wer gesperrt ist, bleibt draussen.
+         */
+        if (msgs[i].kind == PR_MSG_RX &&
+            pr_config_is_banned(cfg, msgs[i].from))
+            continue;
+
+        if (nout > 0) pr_buf_addc(b, ',');
+        nout++;
         pr_buf_addf(b, "{\"kind\":\"%c\",\"ts\":%lld,\"db\":%d,\"from\":\"",
                     msgs[i].kind, msgs[i].ts, msgs[i].db);
         pr_json_escape(b, msgs[i].from);
+        pr_buf_add(b, "\",\"to\":\"");
+        pr_json_escape(b, msgs[i].to);
+        /* Welches Geraet hat es aufgefangen - zeigt "All" an. */
+        pr_buf_add(b, "\",\"station\":\"");
+        pr_json_escape(b, msgs[i].station);
         pr_buf_add(b, "\",\"text\":\"");
         pr_json_escape(b, msgs[i].text);
         pr_buf_add(b, "\"}");

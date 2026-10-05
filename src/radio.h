@@ -28,7 +28,9 @@
 
 typedef struct pr_msg {
     char      kind;
-    char      from[PR_CALLSIGN_MAX];
+    char      from[PR_CALLSIGN_MAX];   /* Absender */
+    char      to[PR_CALLSIGN_MAX];     /* Ziel - leer = Rundspruch */
+    char      station[32];             /* welches Geraet hat es gefangen */
     char      text[PR_MSG_TEXT];
     int       db;
     long long ts;

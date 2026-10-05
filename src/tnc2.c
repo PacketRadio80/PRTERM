@@ -49,6 +49,12 @@ typedef struct tnc2_impl {
 
     bool         in_kiss;
     char         mycall[16];
+    /*
+     * Name der Station, zu der dieses Geraet gehoert. Beim Oeffnen aus
+     * der Konfiguration uebernommen, damit jede empfangene Nachricht ihr
+     * Geraet benennen kann - das zeigt die Ansicht "All".
+     */
+    char         station[32];
 } tnc2_impl;
 
 /* ======================================================================= */
@@ -77,7 +83,8 @@ static void tnc2_save(pr_rig *r, tnc2_impl *t)
 /* Aufnehmen einer empfangenen Nachricht                                   */
 /* ======================================================================= */
 
-static void tnc2_push_rx(tnc2_impl *t, const char *from, const char *text, int db)
+static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
+                         const char *text, int db)
 {
     if (t->npending >= TNC2_MAX_PENDING) {
         memmove(&t->pending[0], &t->pending[1],
@@ -89,6 +96,10 @@ static void tnc2_push_rx(tnc2_impl *t, const char *from, const char *text, int d
     memset(m, 0, sizeof *m);
     m->kind = PR_MSG_RX;
     pr_strlcpy(m->from, from, sizeof m->from);
+    if (to != NULL)
+        pr_strlcpy(m->to, to, sizeof m->to);
+    /* Welches Geraet hat es aufgefangen - damit "All" die Herkunft zeigt. */
+    pr_strlcpy(m->station, t->station, sizeof m->station);
     pr_strlcpy(m->text, text, sizeof m->text);
     m->db = db;
     m->ts = pr_now_s();
@@ -126,7 +137,7 @@ static void tnc2_handle_frame(tnc2_impl *t, const unsigned char *frame, size_t l
     memcpy(text, frame + 16, n);
     text[n] = '\0';
 
-    tnc2_push_rx(t, from, text, t->st.rx_db);
+    tnc2_push_rx(t, to, from, text, t->st.rx_db);
     t->st.rx_count++;
     pr_strlcpy(t->st.last_rx_from, from, sizeof t->st.last_rx_from);
     pr_strlcpy(t->st.last_rx_text, text, sizeof t->st.last_rx_text);
@@ -174,6 +185,7 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
     t->st.link_ok = true;
     t->st.duplex  = cfg->duplex;
     pr_strlcpy(t->mycall, cfg->callerid, sizeof t->mycall);
+    pr_strlcpy(t->station, cfg->active_station, sizeof t->station);
 
     r->impl = t;
 

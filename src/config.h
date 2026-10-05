@@ -63,6 +63,12 @@ typedef struct pr_config {
     char callerid[PR_CALLSIGN_MAX];
     char qth[PR_CFG_STR];
     char locator[16];
+    /*
+     * Name der gerade aktiven Station. Wird von pr_config_apply_station
+     * gesetzt, damit der Treiber empfangene Nachrichten dem Geraet
+     * zuordnen kann, das sie aufgefangen hat.
+     */
+    char active_station[32];
 
     /* [radio] */
     pr_duplex duplex;
