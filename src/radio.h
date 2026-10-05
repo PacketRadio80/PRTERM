@@ -83,6 +83,16 @@ typedef struct pr_rig_vtbl {
     int  (*send)(pr_rig *r, const char *from, const char *text,
                  char *err, size_t errlen);
 
+    /* Pruef-Trager: haelt die Sendung fuer eine gegebene Zeit offen.
+     *
+     * Das ist ein GERAETETEST fuer den Adminbereich - kein Betrieb.
+     * Wichtig fuer KISS: dort schaltet die Hardware beim Rahmen selbst,
+     * es gibt keinen Befehl fuer "nur Traeger". Ein KISS-Treiber muss
+     * die Zeit daher ueber die Rahmenlaenge abbilden.
+     *
+     * Die Compliance-Pruefung liegt wie beim Senden VORHER im Aufrufer. */
+    int  (*carrier_test)(pr_rig *r, unsigned seconds, char *err, size_t errlen);
+
     /* Neue RX-Nachrichten abholen (seit dem letzten Aufruf). */
     int  (*drain)(pr_rig *r, pr_msg *out, size_t cap, size_t *n);
 } pr_rig_vtbl;

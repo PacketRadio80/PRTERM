@@ -164,12 +164,6 @@
       l.className = "chip " + (s.link_ok ? "is-link-ok" : "is-link-bad");
     }
 
-    var p = $("pttbtn");
-    if (p) {
-      p.classList.toggle("ptt-on", !!s.ptt);
-      p.textContent = s.ptt ? "PTT AUS" : "PTT";
-    }
-
     var note = $("duplexnote");
     if (note) {
       note.textContent = s.duplex === "full"
@@ -236,11 +230,51 @@
     });
   }
 
-  function togglePtt() {
-    var on = !$("pttbtn").classList.contains("ptt-on");
-    post({ action: "ptt", on: on ? "1" : "0" }, function (j) {
-      if (j && j.ok === false) flash(j.error || "PTT fehlgeschlagen", "err");
-      refresh(true);
+  /*
+   * Pruef-Trager im Adminbereich - ein Ger\u00e4tetest, kein Betrieb.
+   *
+   * Auch ein leerer Traeger ist eine Funksendung. Darum zuerst ank\u00fcndigen,
+   * dann den Rueckz\u00e4hler zeigen und erst nach der Bestaetigung senden.
+   * Der Abbruch ist jederzeit moeglich.
+   */
+  var pttBusy = false;
+
+  function pttTest() {
+    if (pttBusy) return;
+    var out = $("pttstate");
+
+    /* Stufe 1: ank\u00fcndigen. Sendet noch nichts. */
+    pttBusy = true;
+    if (out) out.textContent = "Pr\u00fcfe \u2026";
+    post({ action: "ptt", run: "0", station: S.station }, function (j) {
+      if (!j || j.ok !== true) {
+        if (out) out.textContent = "";
+        flash((j && j.error) || "Test abgelehnt", "err");
+        pttBusy = false;
+        return;
+      }
+      var wait = j.wait || 3;
+      if (out) out.textContent = j.announce || ("TX in " + wait + " Sekunden");
+
+      /* Countdown - Abbruch bleibt moeglich. */
+      var left = wait;
+      var tick = setInterval(function () {
+        left--;
+        if (left <= 0) {
+          clearInterval(tick);
+          if (out) out.textContent = "Sende \u2026";
+          /* Stufe 2: erst jetzt geht etwas auf die Luft. */
+          post({ action: "ptt", run: "1", station: S.station }, function (k) {
+            pttBusy = false;
+            if (out) out.textContent = k && k.ok === true
+              ? "Test beendet." : "";
+            if (k && k.ok === false) flash(k.error || "Test fehlgeschlagen", "err");
+            refresh(true);
+          });
+        } else if (out) {
+          out.textContent = (j.announce || "TX") + " \u00b7 noch " + left + " s";
+        }
+      }, 1000);
     });
   }
 
@@ -335,8 +369,8 @@
         sendText();
       });
     }
-    var ptt = $("pttbtn");
-    if (ptt) ptt.addEventListener("click", togglePtt);
+    var ptt = $("ptttest");
+    if (ptt) ptt.addEventListener("click", pttTest);
 
     /* Stationsreiter - jeder steht fuer eine eigene Hardware */
     qsa("[data-station]").forEach(function (b) {
@@ -423,7 +457,6 @@
     document.addEventListener("keydown", function (e) {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if (e.key === "/") { e.preventDefault(); var t = $("txtext"); if (t) t.focus(); }
-      if (e.key === "Escape") { var p = $("pttbtn"); if (p) togglePtt(); }
     });
 
     /* Raster bei Groessenaenderung neu ausrechnen */

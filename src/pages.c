@@ -122,9 +122,12 @@ static void app_stop(app *a)
  *
  * Die Pruefung liegt VOR dem KISS-Framing: was hier abgelehnt wird, geht
  * nicht auf die Luft. Siehe docs/REGULATIONS.md.
+ *
+ * Gilt fuer JEDE Funksendung - auch fuer den Pruef-Trager. Ein leerer
+ * Traeger ist eine Sendung und faellt unter dieselben Regeln.
  */
-static int app_tx(app *a, const char *text, const pr_session *sess,
-                  char *err, size_t errlen)
+static int app_tx_gate(app *a, const pr_session *sess,
+                       char *err, size_t errlen)
 {
     if (!a->rig_ok) {
         snprintf(err, errlen, "kein Rig verbunden");
@@ -151,8 +154,15 @@ static int app_tx(app *a, const char *text, const pr_session *sess,
         snprintf(err, errlen, "Senden erfordert eine Anmeldung");
         return -1;
     }
+    return 0;
+}
 
-    return a->rig.vtbl->send(&a->rig, from, text, err, errlen);
+static int app_tx(app *a, const char *text, const pr_session *sess,
+                  char *err, size_t errlen)
+{
+    if (app_tx_gate(a, sess, err, errlen) != 0)
+        return -1;
+    return a->rig.vtbl->send(&a->rig, a->cfg->callerid, text, err, errlen);
 }
 
 /* Kanal zu einer Frequenz - aus dem Rig-Zustand, nicht aus der Config.
@@ -279,10 +289,9 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out,
         "<form class=\"txbar\" id=\"txform\" autocomplete=\"off\">\n"
         "  <input class=\"tx-input\" type=\"text\" id=\"txtext\" name=\"text\" "
-        "placeholder=\"Nachricht eingeben &#8230;  [Enter] senden  "
-        "[Esc] PTT\" enterkeyhint=\"send\" spellcheck=\"false\">\n"
+        "placeholder=\"Nachricht eingeben &#8230;  [Enter] senden\" "
+        "enterkeyhint=\"send\" spellcheck=\"false\">\n"
         "  <button type=\"submit\" class=\"primary\">Senden</button>\n"
-        "  <button type=\"button\" id=\"pttbtn\">PTT</button>\n"
         "  <select id=\"selmode\" title=\"Betriebsart\">");
 
     static const char *const modes[] = { "fm", "am", "ssb" };
@@ -430,6 +439,25 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "</div>\n"
         "<p class=\"hint\">Kanal anklicken zum Umschalten. "
         "<b>&#8727;</b> Gateway &#183; <b>&#9632;</b> Daten</p></div>\n");
+
+    /* --- Geraetetest --- */
+    /*
+     * Der Pruef-Trager ist ein GERAETETEST, kein Betrieb. Darum steht er
+     * ausschliesslich hier und nicht im Terminal. Auch ein leerer Traeger
+     * ist eine Funksendung: zuerst wird angekuendigt, erst nach der
+     * Bestaetigung gesendet.
+     */
+    pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Ger&#228;tetest</h2>\n"
+        "<p>Sendet <b>3 Sekunden lang einen leeren Pr&#252;f-Tr&#228;ger</b> - "
+        "ohne Inhalt, nur zum Pr&#252;fen von Antenne und Sende-LED.</p>\n"
+        "<p class=\"hint\">Das ist eine Funksendung: es wird zuerst "
+        "angek&#252;ndigt, und erst nach der Best&#228;tigung gesendet. "
+        "Die Senderegelung pr&#252;ft vorher, ob der Kanal frei ist.</p>\n"
+        "<div class=\"card-actions\">"
+        "<button type=\"button\" class=\"primary\" id=\"ptttest\">"
+        "3-Sekunden-Test</button> "
+        "<span id=\"pttstate\" class=\"hint\"></span>"
+        "</div></div>\n");
 
     /* --- Bans --- */
     pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Gesperrte Stationen</h2>\n");
@@ -769,11 +797,52 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         }
 
         if (strcmp(action, "ptt") == 0) {
-            bool on = pr_parse_bool(pr_req_param(req, "on"), false);
+            /*
+             * Pruef-Trager - ein GERAETETEST, kein Betrieb.
+             *
+             * Zwei Stufen, weil auch ein leerer Traeger eine Funksendung
+             * ist: "ptt_test" kuendigt nur an und prueft, "ptt_run" fuehrt
+             * aus. Dazwischen hat der Bediener die Chance abzubrechen.
+             */
+            bool run = pr_parse_bool(pr_req_param(req, "run"), false);
             char err[256];
+
+            if (!run) {
+                /* Stufe 1: nur ankundigen, nichts senden. */
+                if (!rig_started) {
+                    json_err(res, a.err);
+                } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
+                    json_err(res, err);
+                } else {
+                    char msg[160];
+                    snprintf(msg, sizeof msg,
+                             "TX in %d Sekunden - leerer Pruef-Trager", 3);
+
+                    pr_msg m;
+                    memset(&m, 0, sizeof m);
+                    m.kind = PR_MSG_TX;
+                    snprintf(m.from, sizeof m.from, "%.60s", "PRTERM");
+                    snprintf(m.text, sizeof m.text, "%.200s", msg);
+                    m.ts = pr_now_s();
+                    (void)pr_log_append(cfg, &m, err, sizeof err);
+
+                    pr_response_json(res, 200);
+                    pr_buf_add(&res->body, "{\"ok\":true,\"announce\":\"");
+                    pr_json_escape(&res->body, msg);
+                    pr_buf_add(&res->body, "\",\"wait\":3}");
+                }
+                app_stop(&a);
+                return 0;
+            }
+
+            /* Stufe 2: ausfuehren. */
             if (!rig_started) {
                 json_err(res, a.err);
-            } else if (a.rig.vtbl->set_ptt(&a.rig, on, err, sizeof err) != 0) {
+            } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
+                json_err(res, err);
+            } else if (a.rig.vtbl->carrier_test == NULL) {
+                json_err(res, "dieser Treiber unterstuetzt keinen Pruef-Trager");
+            } else if (a.rig.vtbl->carrier_test(&a.rig, 3, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
                 json_ok(res);

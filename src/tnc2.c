@@ -396,6 +396,73 @@ static int tnc2_send(pr_rig *r, const char *from, const char *text,
     return 0;
 }
 
+/*
+ * Pruef-Trager fuer den Adminbereich.
+ *
+ * Bei KISS schaltet die Hardware die Sendung beim Rahmen selbst - es
+ * gibt keinen Befehl fuer "nur Traeger ohne Inhalt". Die Testdauer wird
+ * daher ueber die RAHMENLAENGE abgebildet: der Nutzdatenanteil wird so
+ * bemessen, dass die Uebertragung ungefaehr die gewuenschte Zeit
+ * dauert. Inhalt ist Null-Padding, also ohne jede Bedeutung.
+ *
+ * Das ist ehrlicher als ein "PTT an", das bei KISS nur eine Variable
+ * setzt und nichts auf die Luft gibt.
+ */
+static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
+                             char *err, size_t errlen)
+{
+    tnc2_impl *t = r->impl;
+    if (t == NULL) {
+        snprintf(err, errlen, "TNC nicht verbunden");
+        return -1;
+    }
+    if (seconds == 0 || seconds > 10) {
+        snprintf(err, errlen, "Dauer muss zwischen 1 und 10 Sekunden liegen");
+        return -1;
+    }
+    if (t->st.monitor) {
+        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        return -1;
+    }
+
+    /* Bits auf der Luft / 8 = Bytes gesamt, abzueglich AX.25-Kopf (16) + FCS (2). */
+    long baud = r->cfg->radio_baud > 0 ? r->cfg->radio_baud : 1200;
+    long total = (baud * (long)seconds) / 8;
+    long payload = total - 18;
+    if (payload < 32)
+        payload = 32;
+    if (payload > 4000)
+        payload = 4000;
+
+    unsigned char pad[4000];
+    memset(pad, 0, (size_t)payload);
+
+    unsigned char ui[4200];
+    size_t uilen = ax25_ui_frame(ui, sizeof ui, r->cfg->callerid, "CQ",
+                                 pad, (size_t)payload);
+    if (uilen == 0) {
+        snprintf(err, errlen, "Pruefrahmen konnte nicht gebaut werden");
+        return -1;
+    }
+
+    unsigned char frame[8400];
+    size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA, ui, uilen);
+    if (flen == 0) {
+        snprintf(err, errlen, "KISS-Rahmen zu gross");
+        return -1;
+    }
+
+    if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0)
+        return -1;
+
+    tnc2_note(r, PR_MSG_TX, r->cfg->callerid,
+              "[Pruef-Trager ohne Inhalt]");
+    t->st.tx_count++;
+    t->st.last_tx_ts = pr_now_s();
+    tnc2_save(r, t);
+    return 0;
+}
+
 static int tnc2_drain(pr_rig *r, pr_msg *out, size_t cap, size_t *n)
 {
     tnc2_impl *t = r->impl;
@@ -427,5 +494,6 @@ const pr_rig_vtbl pr_rig_tnc2 = {
     tnc2_set_duplex,
     tnc2_set_monitor,
     tnc2_send,
+    tnc2_carrier_test,
     tnc2_drain
 };

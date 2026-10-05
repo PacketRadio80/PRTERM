@@ -20,6 +20,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define SIM_MAX_PENDING 32
 
@@ -370,6 +371,35 @@ static int sim_send(pr_rig *r, const char *from, const char *text,
     return 0;
 }
 
+/*
+ * Pruef-Trager: bei der Simulation wird der Zustand gefuehrt und die
+ * Zeit abgewartet, damit der Ablauf im Test identisch zum Echtgeraet ist.
+ */
+static int sim_carrier_test(pr_rig *r, unsigned seconds,
+                            char *err, size_t errlen)
+{
+    sim_impl *s = r->impl;
+    if (s == NULL) {
+        snprintf(err, errlen, "Simulation nicht verbunden");
+        return -1;
+    }
+    if (seconds == 0 || seconds > 10) {
+        snprintf(err, errlen, "Dauer muss zwischen 1 und 10 Sekunden liegen");
+        return -1;
+    }
+    (void)errlen;
+
+    s->st.ptt = true;
+    s->st.rx_muted = (s->st.duplex == PR_DUPLEX_HALF);
+    sleep(seconds);
+    s->st.ptt = false;
+    s->st.rx_muted = false;
+    s->st.tx_count++;
+    s->st.last_tx_ts = pr_now_s();
+    sim_save(r, s);
+    return 0;
+}
+
 static int sim_drain(pr_rig *r, pr_msg *out, size_t cap, size_t *n)
 {
     sim_impl *s = r->impl;
@@ -401,5 +431,6 @@ const pr_rig_vtbl pr_rig_sim = {
     sim_set_duplex,
     sim_set_monitor,
     sim_send,
+    sim_carrier_test,
     sim_drain
 };

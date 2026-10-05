@@ -565,6 +565,45 @@ static int max25_send(pr_rig *r, const char *from, const char *text,
     return 0;
 }
 
+/*
+ * Pruef-Trager: der MAX25-Stack kennt ein echtes PTT. Hier wird die
+ * Sendung tatsaechlich fuer die Dauer geoeffnet und danach wieder
+ * geschlossen - ohne Nutzdaten.
+ */
+static int max25_carrier_test(pr_rig *r, unsigned seconds,
+                              char *err, size_t errlen)
+{
+    max25_impl *m = r->impl;
+    if (m == NULL) {
+        snprintf(err, errlen, "MAX25 nicht verbunden");
+        return -1;
+    }
+    if (seconds == 0 || seconds > 10) {
+        snprintf(err, errlen, "Dauer muss zwischen 1 und 10 Sekunden liegen");
+        return -1;
+    }
+    if (m->st.monitor) {
+        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        return -1;
+    }
+
+    if (max25_set_ptt(r, true, err, errlen) != 0)
+        return -1;
+
+    sleep(seconds);
+
+    char close_err[128];
+    if (max25_set_ptt(r, false, close_err, sizeof close_err) != 0) {
+        snprintf(err, errlen, "Sendung konnte nicht geschlossen werden: %.180s",
+                 close_err);
+        return -1;
+    }
+
+    m->st.tx_count++;
+    m->st.last_tx_ts = pr_now_s();
+    return 0;
+}
+
 static int max25_drain(pr_rig *r, pr_msg *out, size_t cap, size_t *n)
 {
     max25_impl *m = r->impl;
@@ -596,5 +635,6 @@ const pr_rig_vtbl pr_rig_max25 = {
     max25_set_duplex,
     max25_set_monitor,
     max25_send,
+    max25_carrier_test,
     max25_drain
 };
