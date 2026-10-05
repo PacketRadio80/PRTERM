@@ -621,7 +621,7 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
 
 static void json_state(pr_response *res, const app *a, const pr_config *cfg,
                        const pr_session *sess, const pr_msg *msgs, size_t nmsg,
-                       bool rig_started)
+                       bool rig_started, const pr_station *station)
 {
     pr_response_json(res, 200);
     pr_buf *b = &res->body;
@@ -640,6 +640,10 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
     json_kv_int(b, "rx_count", a->st.rx_count);
     json_kv_int(b, "tx_count", a->st.tx_count);
     json_kv_str(b, "device", a->st.device);
+    if (station != NULL) {
+        json_kv_str(b, "station", station->name);
+        json_kv_int(b, "radio_baud", station->radio_baud);
+    }
     json_kv_bool(b, "link_ok", a->st.link_ok);
     /* Grund, warum das Rig nicht hochgekommen ist - ohne das bleibt das
      * Problem unsichtbar: die Seite rendert, aber nichts funktioniert. */
@@ -705,6 +709,16 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
     /* ---- Sitzung ----------------------------------------------------- */
     pr_session sess;
     pr_session_from_request(cfg, req, &sess);
+
+    /*
+     * Stationsreiter: die gewaehlte Station legt fest, mit WELCHER
+     * Hardware gearbeitet wird. Ohne Auswahl gilt die erste aktivierte.
+     *
+     * Das ist der Kern der Mehrgeraete-Bedienung: jeder Reiter steht fuer
+     * eine vollstaendige Station mit eigenem TNC, Funkgeraet und Antenne.
+     */
+    const pr_station *station = pr_config_apply_station(
+        cfg, pr_req_param(req, "station"));
 
     app a;
     bool rig_started = (app_start(&a, cfg) == 0);
@@ -923,7 +937,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         /* neue Nachrichten seit dem letzten Abruf waeren besser, aber ein
          * kurzes Fenster reicht fuer die Anzeige */
         size_t from = nmsg > 12 ? nmsg - 12 : 0;
-        json_state(res, &a, cfg, &sess, msgs + from, nmsg - from, rig_started);
+        json_state(res, &a, cfg, &sess, msgs + from, nmsg - from, rig_started, station);
         app_stop(&a);
         return 0;
     }

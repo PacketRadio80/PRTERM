@@ -12,6 +12,7 @@
      ---------------------------------------------------------------------- */
   var S = {
     view: "terminal",
+    station: "",
     loggedIn: false,
     cols: 0,
     rows: 0,
@@ -186,7 +187,15 @@
   /* ----------------------------------------------------------------------
      Aktionen
      ---------------------------------------------------------------------- */
+    /* Die aktive Station bestimmt, mit WELCHER Hardware gearbeitet wird.
+     Jeder Reiter steht fuer eine vollstaendige Station. */
+  function withStation(data) {
+    if (S.station) data.station = S.station;
+    return data;
+  }
+
   function post(data, done) {
+    data = withStation(data);
     if (S.busy) return;
     S.busy = true;
     var body = [];
@@ -257,7 +266,8 @@
      Aktualisierung
      ---------------------------------------------------------------------- */
   function refresh(force) {
-    var q = "?action=state&rows=" + S.rows + "&cols=" + S.cols;
+    var q = "?action=state&rows=" + S.rows + "&cols=" + S.cols +
+      (S.station ? "&station=" + encodeURIComponent(S.station) : "");
     fetch(q, { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -323,6 +333,16 @@
     }
     var ptt = $("pttbtn");
     if (ptt) ptt.addEventListener("click", togglePtt);
+
+    /* Stationsreiter - jeder steht fuer eine eigene Hardware */
+    qsa("[data-station]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        qsa("[data-station]").forEach(function (x) { x.classList.remove("is-current"); });
+        b.classList.add("is-current");
+        S.station = b.getAttribute("data-station") || "";
+        refresh(true);
+      });
+    });
 
     /* Kanalraster */
     qsa(".ch").forEach(function (el) {

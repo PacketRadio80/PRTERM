@@ -135,6 +135,22 @@ const pr_ban *pr_config_find_ban(const pr_config *cfg, const char *pattern);
 /* ---- Hilfsfunktionen -------------------------------------------------- */
 const char *pr_duplex_name(pr_duplex d);
 pr_duplex   pr_duplex_from_name(const char *s);
+
+/* ---- Stationen ------------------------------------------------------- */
+/*
+ * Legt die Geraete-Einstellungen einer Station ueber die Konfiguration.
+ *
+ * Jede Station ist eine vollstaendige Einheit: eigener TNC, eigenes
+ * Funkgeraet, eigene Antenne. Wenn im Browser ein Stationsreiter
+ * gewaehlt wird, muessen Port, Baud und Funk-Baudrate der STATION
+ * gelten - nicht die globalen Werte aus [radio].
+ *
+ * Liefert die Station oder NULL wenn unbekannt.
+ */
+const pr_station *pr_config_apply_station(pr_config *cfg, const char *name);
+const pr_station *pr_config_station(const pr_config *cfg, const char *name);
+/* Erste aktivierte Station, falls keine ausgewaehlt wurde. */
+const pr_station *pr_config_default_station(const pr_config *cfg);
 /* Kanalnummer zur aktuellen Frequenz, -1 wenn keiner. */
 int         pr_config_channel(const pr_config *cfg);
 /* Frequenz zu einer Kanalnummer setzen; false wenn ungueltig. */

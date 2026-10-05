@@ -432,6 +432,54 @@ pr_duplex pr_duplex_from_name(const char *s)
     return pr_str_eq_ci(s, "full") ? PR_DUPLEX_FULL : PR_DUPLEX_HALF;
 }
 
+/* ======================================================================= */
+/* Stationen                                                               */
+/* ======================================================================= */
+
+const pr_station *pr_config_station(const pr_config *cfg, const char *name)
+{
+    if (cfg == NULL || name == NULL || name[0] == '\0')
+        return NULL;
+    for (size_t i = 0; i < cfg->nstations; i++) {
+        if (pr_str_eq_ci(cfg->stations[i].name, name))
+            return &cfg->stations[i];
+    }
+    return NULL;
+}
+
+const pr_station *pr_config_default_station(const pr_config *cfg)
+{
+    if (cfg == NULL)
+        return NULL;
+    for (size_t i = 0; i < cfg->nstations; i++) {
+        if (cfg->stations[i].enabled)
+            return &cfg->stations[i];
+    }
+    return cfg->nstations > 0 ? &cfg->stations[0] : NULL;
+}
+
+const pr_station *pr_config_apply_station(pr_config *cfg, const char *name)
+{
+    const pr_station *st = pr_config_station(cfg, name);
+    if (st == NULL)
+        st = pr_config_default_station(cfg);
+    if (st == NULL)
+        return NULL;
+
+    /*
+     * Nur die Geraete-Einstellungen uebernehmen. Frequenz und Kanal
+     * gelten fuer alle Stationen auf demselben Kanal.
+     */
+    pr_strlcpy(cfg->port, st->port, sizeof cfg->port);
+    cfg->baud = st->baud;
+    cfg->radio_baud = st->radio_baud;
+    pr_strlcpy(cfg->modem, st->modem, sizeof cfg->modem);
+    pr_strlcpy(cfg->serial_line, st->serial_line, sizeof cfg->serial_line);
+    pr_strlcpy(cfg->rig_driver, st->rig_driver, sizeof cfg->rig_driver);
+    pr_strlcpy(cfg->callerid, st->callerid, sizeof cfg->callerid);
+    return st;
+}
+
 int pr_config_channel(const pr_config *cfg)
 {
     if (cfg == NULL || cfg->bandplan == NULL)
