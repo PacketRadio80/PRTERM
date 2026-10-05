@@ -298,7 +298,28 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
      */
     static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
     (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
-    usleep(3000000);   /* Startvorgang abwarten: Status/Connected 2-3 s */
+
+    /*
+     * Warten, bis der Startvorgang WIRKLICH vorbei ist.
+     *
+     * Starr 3 Sekunden zu warten war zu wenig: der Banner laeuft dann
+     * noch, und MYCALL/UNPROTO gingen mitten im Booten raus - das TNC
+     * hat sie nicht verarbeitet, und es kam keine Sendung zustande.
+     * Besser: den Auslauf abwarten, bis eine Weile nichts mehr kommt.
+     */
+    {
+        unsigned char boot[2048];
+        long total = 0;
+        for (int round = 0; round < 12; round++) {
+            long got = pr_serial_read_quiet(&st->ser, boot, sizeof boot,
+                                           1000, 350, e2, sizeof e2);
+            if (got <= 0)
+                break;
+            total += got;
+        }
+        (void)total;
+    }
+    usleep(500000);
 
     /* 2. MYCALL wieder setzen - sonst sendet UNPROTO mit der falschen
      *    Kennung auf die Luft. */

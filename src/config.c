@@ -58,7 +58,7 @@ void pr_config_defaults(pr_config *cfg)
     pr_strlcpy(cfg->modem, "", sizeof cfg->modem);
     pr_strlcpy(cfg->serial_line, "8n1", sizeof cfg->serial_line);
     pr_strlcpy(cfg->kiss_init, "esc", sizeof cfg->kiss_init);
-    pr_strlcpy(cfg->tx_mode, "kiss", sizeof cfg->tx_mode);
+    pr_strlcpy(cfg->tx_mode, "unproto", sizeof cfg->tx_mode);
     cfg->freq_hz    = 27235000L;
     cfg->mode       = PR_BAND_FM;       /* Default: FM */
     cfg->tx_power_mw = 4000;            /* 4 W ERP - CB-Grenzwert */
@@ -147,7 +147,7 @@ static void apply_stations(pr_config *cfg, const ini *i)
         copy_str(st->modem, sizeof st->modem, i, sec, "modem", "");
         copy_str(st->serial_line, sizeof st->serial_line, i, sec, "line", "8n1");
         copy_str(st->kiss_init, sizeof st->kiss_init, i, sec, "kiss_init", "esc");
-        copy_str(st->tx_mode, sizeof st->tx_mode, i, sec, "tx_mode", "kiss");
+        copy_str(st->tx_mode, sizeof st->tx_mode, i, sec, "tx_mode", "unproto");
         pr_lower(st->tx_mode);
         pr_lower(st->kiss_init);
         copy_str(st->antenna, sizeof st->antenna, i, sec, "antenne", "");
