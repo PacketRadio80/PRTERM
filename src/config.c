@@ -57,6 +57,7 @@ void pr_config_defaults(pr_config *cfg)
     cfg->radio_baud = 1200;
     pr_strlcpy(cfg->modem, "", sizeof cfg->modem);
     pr_strlcpy(cfg->serial_line, "8n1", sizeof cfg->serial_line);
+    pr_strlcpy(cfg->kiss_init, "esc", sizeof cfg->kiss_init);
     cfg->freq_hz    = 27235000L;
     cfg->mode       = PR_BAND_FM;       /* Default: FM */
     cfg->tx_power_mw = 4000;            /* 4 W ERP - CB-Grenzwert */
@@ -144,6 +145,8 @@ static void apply_stations(pr_config *cfg, const ini *i)
         st->radio_baud = clamp_long(ini_get_int(i, sec, "radio_baud", 1200), 50, 9600);
         copy_str(st->modem, sizeof st->modem, i, sec, "modem", "");
         copy_str(st->serial_line, sizeof st->serial_line, i, sec, "line", "8n1");
+        copy_str(st->kiss_init, sizeof st->kiss_init, i, sec, "kiss_init", "esc");
+        pr_lower(st->kiss_init);
         copy_str(st->antenna, sizeof st->antenna, i, sec, "antenne", "");
         st->enabled = ini_get_bool(i, sec, "enabled", true);
 
@@ -207,6 +210,8 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     copy_str(cfg->modem, sizeof cfg->modem, i, "radio", "modem", "");
     copy_str(cfg->serial_line, sizeof cfg->serial_line, i, "radio", "line", "8n1");
     pr_lower(cfg->serial_line);
+    copy_str(cfg->kiss_init, sizeof cfg->kiss_init, i, "radio", "kiss_init", "esc");
+    pr_lower(cfg->kiss_init);
     cfg->duplex = pr_duplex_from_name(ini_get(i, "radio", "duplex", "full"));
     cfg->freq_hz = ini_get_int(i, "radio", "freq_hz", 27125000L);
     cfg->mode = pr_band_mode_from_name(ini_get(i, "radio", "mode", "am"));
@@ -475,6 +480,7 @@ const pr_station *pr_config_apply_station(pr_config *cfg, const char *name)
     cfg->radio_baud = st->radio_baud;
     pr_strlcpy(cfg->modem, st->modem, sizeof cfg->modem);
     pr_strlcpy(cfg->serial_line, st->serial_line, sizeof cfg->serial_line);
+    pr_strlcpy(cfg->kiss_init, st->kiss_init, sizeof cfg->kiss_init);
     pr_strlcpy(cfg->rig_driver, st->rig_driver, sizeof cfg->rig_driver);
     pr_strlcpy(cfg->callerid, st->callerid, sizeof cfg->callerid);
     pr_strlcpy(cfg->active_station, st->name, sizeof cfg->active_station);

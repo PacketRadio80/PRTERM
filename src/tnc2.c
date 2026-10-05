@@ -203,9 +203,16 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
         (void)pr_serial_write(&t->ser, jhost, sizeof jhost, e2, sizeof e2);
         usleep(300000);
 
-        /* KISS betreten */
-        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
-        (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+        /* KISS betreten - die Geraete unterscheiden sich hier. */
+        if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
+            /* PK-TNC2 und TAPR-Klasse: ausgeschriebener Befehl */
+            static const unsigned char kiss_on[] = { 'k','i','s','s',' ','o','n','\r' };
+            (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+        } else {
+            /* Landolt TNC2C: ESC @K, bewusst OHNE \r */
+            static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
+            (void)pr_serial_write(&t->ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
+        }
         usleep(200000);
 
         /* Reste aus dem Umschalten verwerfen */

@@ -41,6 +41,7 @@ typedef struct pr_station {
     long radio_baud;               /* FEST - Hardware, nicht änderbar   */
     char modem[32];
     char serial_line[8];
+    char kiss_init[16];           /* "esc" oder "tapr" - siehe radio.h */
     char callerid[PR_CALLSIGN_MAX];
     char antenna[64];              /* Beschreibung, für die Anzeige     */
     bool enabled;
@@ -78,6 +79,13 @@ typedef struct pr_config {
     long radio_baud;              /* auf dem Kanal: 2400 / 1200       */
     char modem[32];               /* Modem-Typ im TNC, z.B. tcm3105   */
     char serial_line[8];          /* "8n1", "7e1", ... */
+    /*
+     * Wie das TNC in den KISS-Modus gefuehrt wird. Die Geraete
+     * unterscheiden sich hier, siehe docs/TNC-INIT.md:
+     *   esc   1B 40 4B  (ESC @K, ohne \r)   - Landolt TNC2C
+     *   tapr  "kiss on\r"                   - PK-TNC2, TAPR-Klasse
+     */
+    char kiss_init[16];
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
     long tx_power_mw;         /* Sendeleistung fuer die Compliance-Pruefung */
