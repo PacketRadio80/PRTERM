@@ -113,6 +113,7 @@ set(PRTERM_CORE_SOURCES
     src/html.c
     src/admin.c
     src/selftest.c
+    src/tncsock.c
     src/pages.c
     "${PRTERM_CSS_SRC}"
     "${PRTERM_JS_SRC}")
@@ -152,6 +153,17 @@ add_executable(prterm src/main.c)
 target_link_libraries(prterm PRIVATE prterm_core)
 target_compile_options(prterm PRIVATE ${PRTERM_WARN_FLAGS})
 set_target_properties(prterm PROPERTIES OUTPUT_NAME "prterm.cgi" PREFIX "")
+
+# ---------------------------------------------------------------------------
+# The device daemon - keeps the serial ports open and holds KISS
+#
+# A CGI process ends after every request. When the last file descriptor
+# goes, USB serial adapters reset and the TNC leaves KISS. This daemon
+# is what keeps that from happening.
+# ---------------------------------------------------------------------------
+add_executable(prterm-tncd src/tncd.c)
+target_link_libraries(prterm-tncd PRIVATE prterm_core)
+target_compile_options(prterm-tncd PRIVATE ${PRTERM_WARN_FLAGS})
 
 # ---------------------------------------------------------------------------
 # Shell helpers (optional)

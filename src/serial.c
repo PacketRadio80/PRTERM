@@ -133,6 +133,20 @@ int pr_serial_open(pr_serial *s, const char *dev,
 
     /* Zeilenformat */
     t.c_cflag &= ~(unsigned)(CSIZE | PARENB | PARODD | CSTOPB);
+
+    /*
+     * HUPCL AUS: der Port darf beim Schliessen DTR NICHT fallen lassen.
+     *
+     * Ein CGI oeffnet und schliesst den Port bei jedem Aufruf - die
+     * Zustandsabfrage laeuft sekuendlich. Wuerde dabei DTR fallen,
+     * risse das den TNC2C bei jedem Aufruf aus dem KISS-Modus in einen
+     * Echo-only-Zustand. Genau deshalb ging kein PTT mehr.
+     *
+     * Der KISS-Modus soll DAUERHAFT halten, auch wenn zwischen zwei
+     * Anfragen kein Prozess mehr am Port haengt.
+     */
+    t.c_cflag &= ~(unsigned)HUPCL;
+
     t.c_cflag |= (unsigned)(CLOCAL | CREAD);
     t.c_cflag |= (unsigned)(databits == 7 ? CS7 : CS8);
     if (parity == PR_PAR_EVEN) {
@@ -378,6 +392,20 @@ int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
     }
 
     t.c_cflag &= ~(unsigned)(CSIZE | PARENB | PARODD | CSTOPB);
+
+    /*
+     * HUPCL AUS: der Port darf beim Schliessen DTR NICHT fallen lassen.
+     *
+     * Ein CGI oeffnet und schliesst den Port bei jedem Aufruf - die
+     * Zustandsabfrage laeuft sekuendlich. Wuerde dabei DTR fallen,
+     * risse das den TNC2C bei jedem Aufruf aus dem KISS-Modus in einen
+     * Echo-only-Zustand. Genau deshalb ging kein PTT mehr.
+     *
+     * Der KISS-Modus soll DAUERHAFT halten, auch wenn zwischen zwei
+     * Anfragen kein Prozess mehr am Port haengt.
+     */
+    t.c_cflag &= ~(unsigned)HUPCL;
+
     t.c_cflag |= (unsigned)(CLOCAL | CREAD);
     t.c_cflag |= (unsigned)(databits == 7 ? CS7 : CS8);
     if (parity == PR_PAR_EVEN)      t.c_cflag |= (unsigned)PARENB;
