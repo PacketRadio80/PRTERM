@@ -472,6 +472,23 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
  * Das ist ehrlicher als ein "PTT an", das bei KISS nur eine Variable
  * setzt und nichts auf die Luft gibt.
  */
+/*
+ * Pruef-Trager fuer den Adminbereich.
+ *
+ * Bei KISS schaltet die Hardware die Sendung beim Rahmen selbst - es
+ * gibt keinen Befehl fuer "nur Traeger ohne Inhalt". Die Dauer wird
+ * ueber die Rahmenanzahl abgebildet.
+ *
+ * WICHTIG: jeder Rahmen bleibt in der fuer AX.25 ueblichen Groesse
+ * (PACLEN, hier 256 Byte Nutzdaten). Ein einzelner, aufgeblasener
+ * Rahmen wird vom TNC abgelehnt oder bleibt im Speicher liegen - die
+ * LED "unbestaetigte Daten" leuchtet dann dauerhaft, obwohl nichts zu
+ * bestaetigen ist. Genau das ist hier passiert.
+ *
+ * Der Inhalt ist Null-Padding, also ohne jede Bedeutung.
+ */
+#define TNC2_PACLEN 256
+
 static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
                              char *err, size_t errlen)
 {
@@ -489,44 +506,50 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         return -1;
     }
 
-    /* Bits auf der Luft / 8 = Bytes gesamt, abzueglich AX.25-Kopf (16) + FCS (2). */
+    /*
+     * Wie viele Rahmen brauchen wir? Jeder Rahmen bindet die Sendung
+     * fuer seine Uebertragungsdauer. Die Reihenfolge wird bewusst so
+     * gewaehlt, dass das PTT nicht dazwischen faellt.
+     */
     long baud = r->cfg->radio_baud > 0 ? r->cfg->radio_baud : 1200;
-    long total = (baud * (long)seconds) / 8;
-    long payload = total - 18;
-    if (payload < 32)
-        payload = 32;
-    if (payload > 4000)
-        payload = 4000;
+    long bits_needed = (long)seconds * baud;
+    long bytes_needed = bits_needed / 8;
+    /* abzueglich AX.25-Kopf (16) und FCS (2) je Rahmen */
+    long per_frame = TNC2_PACLEN + 18;
+    long frames = (bytes_needed + per_frame - 1) / per_frame;
+    if (frames < 1) frames = 1;
+    if (frames > 40) frames = 40;
 
-    unsigned char pad[4000];
-    memset(pad, 0, (size_t)payload);
+    unsigned char pad[TNC2_PACLEN];
+    memset(pad, 0, sizeof pad);
 
-    unsigned char ui[4200];
-    size_t uilen = ax25_ui_frame(ui, sizeof ui, r->cfg->callerid, "CQ",
-                                 pad, (size_t)payload);
-    if (uilen == 0) {
-        snprintf(err, errlen, "Pruefrahmen konnte nicht gebaut werden");
-        return -1;
-    }
+    for (long k = 0; k < frames; k++) {
+        unsigned char ui[320];
+        size_t uilen = ax25_ui_frame(ui, sizeof ui, r->cfg->callerid, "CQ",
+                                     pad, TNC2_PACLEN);
+        if (uilen == 0) {
+            snprintf(err, errlen, "Pruefrahmen konnte nicht gebaut werden");
+            return -1;
+        }
 
-    unsigned char frame[8400];
-    size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA, ui, uilen);
-    if (flen == 0) {
-        snprintf(err, errlen, "KISS-Rahmen zu gross");
-        return -1;
-    }
+        unsigned char frame[700];
+        size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA,
+                                  ui, uilen);
+        if (flen == 0) {
+            snprintf(err, errlen, "KISS-Rahmen zu gross");
+            return -1;
+        }
 
-    if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0) {
-        t->st.ptt = false;
-        t->st.rx_muted = false;
-        return -1;
+        if (pr_serial_write(&t->ser, frame, flen, err, errlen) != 0) {
+            t->st.ptt = false;
+            t->st.rx_muted = false;
+            return -1;
+        }
     }
 
     /*
-     * Bei KISS ist die Sendung mit dem Rahmen abgeschlossen - das TNC
-     * schaltet selbst und laesst wieder los. Der Zustand wird deshalb
-     * sofort freigegeben, sonst steht nach dem Test ein Sendezustand,
-     * den es gar nicht gibt.
+     * Bei KISS ist die Sendung mit dem letzten Rahmen abgeschlossen -
+     * das TNC schaltet selbst und laesst wieder los.
      */
     t->st.ptt = false;
     t->st.rx_muted = false;

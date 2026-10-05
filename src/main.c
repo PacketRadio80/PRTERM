@@ -115,8 +115,8 @@ static void usage(FILE *f)
 "  -h, --help                diese Hilfe\n"
 "  -V, --version             Version\n"
 "  --check-ini [DATEI]       Konfiguration pruefen\n"
-"  --selftest [DATEI]        Geraete-Zustand pruefen\n"
-"  --reset-tnc [DATEI]       Notfall-Ruecksetzung des TNC ausloesen\n"
+"  --selftest [DATEI] [STATION]   Geraete-Zustand pruefen\n"
+"  --reset-tnc [DATEI] [STATION]  Notfall-Ruecksetzung des TNC ausloesen\n"
 "  --print-config [DATEI]    wirksame Konfiguration anzeigen\n"
 "  --gen-ini [DATEI]         Beispiel-konfiguration erzeugen\n"
 "  --hash-password PASS      Passwort-Hash fuer [admin] pass_hash\n"
@@ -252,6 +252,22 @@ static int cli(int argc, char **argv, const char *ini_path)
             pr_config_free(&cfg);
             return 1;
         }
+        /*
+         * Station waehlen. Ohne Angabe gilt die erste aktivierte - bei
+         * mehreren TNCs muss man aber bestimmen koennen, WELCHES Geraet
+         * geprueft oder zurueckgesetzt wird.
+         */
+        if (argc > 3 && argv[3][0] != '\0') {
+            if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
+                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  vorhanden:");
+                for (size_t k = 0; k < cfg.nstations; k++)
+                    fprintf(stderr, " %s", cfg.stations[k].name);
+                fprintf(stderr, "\n");
+                pr_config_free(&cfg);
+                return 1;
+            }
+        }
         printf("PRTERM Zustandspruefung\n");
         printf("  Geraet : %s\n", cfg.port);
         printf("  Treiber: %s\n\n", cfg.rig_driver);
@@ -270,6 +286,17 @@ static int cli(int argc, char **argv, const char *ini_path)
             fprintf(stderr, "FEHLER: %s\n", err);
             pr_config_free(&cfg);
             return 1;
+        }
+        if (argc > 3 && argv[3][0] != '\0') {
+            if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
+                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  vorhanden:");
+                for (size_t k = 0; k < cfg.nstations; k++)
+                    fprintf(stderr, " %s", cfg.stations[k].name);
+                fprintf(stderr, "\n");
+                pr_config_free(&cfg);
+                return 1;
+            }
         }
         printf("PRTERM Notfall-Ruecksetzung fuer %s\n\n", cfg.port);
 
