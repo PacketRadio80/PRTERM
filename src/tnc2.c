@@ -73,6 +73,15 @@ static void tnc2_note(pr_rig *r, char kind, const char *from, const char *text)
     m.kind = kind;
     pr_strlcpy(m.from, from, sizeof m.from);
     pr_strlcpy(m.text, text, sizeof m.text);
+    /*
+     * Own entries carry the device too - that is what the device
+     * filter of the RX/TX menu needs to show a transmission under
+     * the device that sent it.
+     */
+    if (r->impl != NULL) {
+        tnc2_impl *t = r->impl;
+        pr_strlcpy(m.station, t->station, sizeof m.station);
+    }
     m.ts = pr_now_s();
     char err[128];
     (void)pr_log_append(r->cfg, &m, err, sizeof err);

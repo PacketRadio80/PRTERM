@@ -12,8 +12,14 @@
      ---------------------------------------------------------------------- */
   var S = {
     view: "terminal",
-    station: "",    /* RX filter only, tabs on the left  */
-    txdev: "",      /* transmitting device only, selection in the send bar */
+    /*
+     * One menu for reception and transmission (RX/TX):
+     *   rxtx === ""   "All" - hear every device, CQ/broadcast goes
+     *                 out over the device chosen in "cqdev"
+     *   rxtx !== ""   exactly this device: hear it, transmit with it
+     */
+    rxtx: "",
+    cqdev: "",      /* device for CQ/broadcast, only under "All"    */
     since: 0,
     msgs: [],
     callerid: "",
@@ -139,22 +145,22 @@
   /*
    * Two views on the same messages:
    *
-   *   All            everything falling on the channel - every
-   *                  broadcast, every foreign conversation. Banned
-   *                  stations stay outside (the server filters them).
-   *   freq@baud      only what is addressed to THIS station.
+   *   All          everything falling on the channel - every
+   *                broadcast, every foreign conversation. Banned
+   *                stations stay outside (the server filters them).
+   *   <device>     only what THIS device picked up. 1200 and 2400
+   *                baud are different modems - what one hears is not
+   *                what the other hears.
    *
    * In "All" every message names the device that picked it up -
    * otherwise several TNCs on one channel could not be told apart.
    */
   function msgVisible(m) {
-    /* System and own messages always     */
-    if (m.kind !== "R") return true;
-    if (!S.station) return true;
-    /* Station tab: only addressed to me   */
-    var me = (S.callerid || "").toUpperCase();
-    var to = (m.to || "").toUpperCase();
-    return me !== "" && to === me;
+    if (!S.rxtx) return true;              /* All: everything        */
+    /* System messages and own transmissions carry the device too -
+     * those without one are shown everywhere. */
+    if (m.kind !== "R") return !m.station || m.station === S.rxtx;
+    return m.station === S.rxtx;
   }
 
   function renderLog(items) {
@@ -181,7 +187,7 @@
         '<span class="' + cls + '">' +
         '<span class="t">' + time + "</span> " +
         /* Which device picked it up - only needed in "All".     */
-        (m.station && !S.station
+        (m.station && !S.rxtx
           ? '<span class="dev">@' + esc(m.station) + "</span> " : "") +
         (m.from ? '<span class="who">' + esc(m.from) + "</span> " : "") +
         '<span class="tx">' + esc(m.text) + "</span>" +
@@ -217,13 +223,6 @@
     set("s-mode", String(s.mode || "").toUpperCase());
     set("s-channel", s.channel > 0 ? s.channel : "—");
 
-    // Write the checkboxes back from the state. Without this the mode
-    // box keeps showing the new value after a rejected switch, although
-    // nothing changed on the device.
-    var sel = $("selmode");
-    if (sel && sel.value !== (s.mode || "")) sel.value = s.mode || "";
-    var dsel = $("selduplex");
-    if (dsel && dsel.value !== (s.duplex || "")) dsel.value = s.duplex || "";
     set("s-rx", s.rx_count || 0);
     set("s-tx", s.tx_count || 0);
     set("s-signal", (s.rx_db != null ? s.rx_db : "-") + " dBm");
@@ -255,17 +254,24 @@
     return (hz / 1000000).toFixed(3) + " MHz";
   }
 
+  /*
+   * The CQ menu only exists under "All". With a single device the
+   * device itself transmits - a second choice would contradict it.
+   */
+  function showCqDev() {
+    var lbl = $("cqlbl"), dev = $("cqdev");
+    if (lbl) lbl.hidden = !!S.rxtx;
+    if (dev) dev.hidden = !!S.rxtx;
+  }
+
   /* ----------------------------------------------------------------------
      Actions
      ---------------------------------------------------------------------- */
-    /* The active station decides WHICH hardware is used.
-     Every tab stands for a complete station. */
   function withStation(data) {
-    /* Sending runs via the selected device, NOT via the receive
-     * filter. Both are independent - 1200 and 2400 baud do not
-     * understand each other, the sender is chosen explicitly. */
-    if (S.txdev) data.station = S.txdev;
-    else if (S.station) data.station = S.station;
+    /* The device decides WHICH hardware is used - under "All" the one
+     * chosen for CQ/broadcast, otherwise the selected device itself.
+     * Reception filtering happens client-side, see msgVisible(). */
+    data.station = S.rxtx || S.cqdev;
     /* Send the CSRF token along. Without it all fetch actions fail
      * with "invalid token" for logged-in users. */
     var meta = document.querySelector('meta[name="csrf"]');
@@ -308,13 +314,14 @@
     var to = call ? call.value.trim().toUpperCase() : "";
 
     /*
-     * Broadcast only from "All". The station tabs are for direct
-     * communication with one partner - a destination must be given
-     * there. The server checks this too.
+     * Broadcast (CQ) only under "All" - there the CQ menu decides
+     * which device transmits. With a single device one talks to ONE
+     * partner, so a destination must be given. The server checks
+     * this too.
      */
-    var isAll = !S.station;
+    var isAll = !S.rxtx;
     if (!isAll && (!to || to === "CQ")) {
-      flash("Please address a station in this tab \u2013 broadcast only under \"All\".", "warn");
+      flash("Please address a station \u2013 broadcast only under \"All\".", "warn");
       if (call) call.focus();
       return;
     }
@@ -346,7 +353,7 @@
     /* Stage 1: announce. Sends nothing yet.         */
     pttBusy = true;
     if (out) out.textContent = "Checking \u2026";
-    post({ action: "ptt", run: "0", station: S.station }, function (j) {
+    post({ action: "ptt", run: "0" }, function (j) {
       if (!j || j.ok !== true) {
         if (out) out.textContent = "";
         flash((j && j.error) || "test rejected", "err");
@@ -364,7 +371,7 @@
           clearInterval(tick);
           if (out) out.textContent = "Sending \u2026";
           /* Stage 2: only now something goes on the air. */
-          post({ action: "ptt", run: "1", station: S.station }, function (k) {
+          post({ action: "ptt", run: "1" }, function (k) {
             pttBusy = false;
             if (out) out.textContent = k && k.ok === true
               ? "Test finished." : "";
@@ -405,7 +412,8 @@
      ---------------------------------------------------------------------- */
   function refresh(force) {
     var q = "?action=state&rows=" + S.rows + "&cols=" + S.cols +
-      (S.station ? "&station=" + encodeURIComponent(S.station) : "") +
+      (S.rxtx || S.cqdev
+        ? "&station=" + encodeURIComponent(S.rxtx || S.cqdev) : "") +
       (S.since ? "&since=" + S.since : "");
     fetch(q, { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
@@ -505,39 +513,43 @@
         sendText();
       });
     }
-    /* Transmitting device - only for sending, reception stays under "All" */
-    var txdev = $("txdev");
-    if (txdev) {
-      S.txdev = txdev.value || "";
-      txdev.addEventListener("change", function () {
-        S.txdev = txdev.value || "";
+    /*
+     * RX/TX menu - reception filter and transmitting device in one.
+     * Under "All" the CQ menu decides which device transmits; with a
+     * single device the device itself is the sender.
+     */
+    var rxtx = $("rxtx");
+    if (rxtx) {
+      S.rxtx = rxtx.value || "";
+      rxtx.addEventListener("change", function () {
+        S.rxtx = rxtx.value || "";
+        showCqDev();
+        rerenderLog();
+      });
+    }
+    var cqdev = $("cqdev");
+    if (cqdev) {
+      S.cqdev = cqdev.value || "";
+      cqdev.addEventListener("change", function () {
+        S.cqdev = cqdev.value || "";
+      });
+    }
+    showCqDev();
+
+    /* Enter in CALL: continues in the message line       */
+    var callto = $("callto");
+    if (callto) {
+      callto.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          var t = $("txtext");
+          if (t) t.focus();
+        }
       });
     }
 
     var ptt = $("ptttest");
     if (ptt) ptt.addEventListener("click", pttTest);
-
-    /* Station tabs - each stands for own hardware            */
-    qsa("[data-station]").forEach(function (b) {
-      b.addEventListener("click", function () {
-        /* the same marking as Terminal / Administration on the right */
-        qsa("[data-station]").forEach(function (x) { x.classList.remove("is-active"); });
-        b.classList.add("is-active");
-        S.station = b.getAttribute("data-station") || "";
-        /* The device choice belongs ONLY to "All". In a station tab the
-         * device of that tab applies - a selection would be contradictory. */
-        var dev = $("txdev");
-        var devLbl = $("txdevlbl");
-        if (dev) {
-          var isAll = !S.station;
-          dev.hidden = !isAll;
-          if (devLbl) devLbl.hidden = !isAll;
-          if (!isAll) S.txdev = S.station;
-          else S.txdev = dev.value || "";
-        }
-        rerenderLog();
-      });
-    });
 
     /* Channel grid */
     qsa(".ch").forEach(function (el) {
@@ -551,29 +563,9 @@
       });
     });
 
-    /* Mode / duplex        */
-    var mode = $("selmode");
-    if (mode) {
-      mode.addEventListener("change", function () {
-        var want = mode.value;
-        post({ action: "set", mode: want }, function (j) {
-          if (j && j.ok === false) {
-            flash(j.error || "switching not possible", "err");
-          }
-          // re-read state - puts the box back to the real value
-          refresh(true);
-        });
-      });
-    }
-    var duplex = $("selduplex");
-    if (duplex) {
-      duplex.addEventListener("change", function () {
-        post({ action: "set", duplex: duplex.value }, function () {
-          refresh(true);
-          location.reload();
-        });
-      });
-    }
+    /* Mode FM/AM/SSB and duplex are station settings - they are set
+     * in the administration (Radio card) and no longer in the send
+     * bar. Nothing to bind here. */
 
     /* Login     */
     var loginForm = $("loginform");

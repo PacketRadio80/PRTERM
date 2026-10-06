@@ -113,6 +113,14 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
         return;
     }
 
+    /* FM/AM/SSB - the mode is a station setting and lives in the admin */
+    const char *mode = arg(req, "mode");
+    unsigned mode_bit = pr_band_mode_from_name(mode);
+    if (mode_bit == 0) {
+        json_err(res, "mode must be \"fm\", \"am\" or \"ssb\"");
+        return;
+    }
+
     long freq = pr_parse_long(arg(req, "freq_hz"), 0, NULL);
     long pwr  = pr_parse_long(arg(req, "tx_power_mw"), 0, NULL);
     long baud = pr_parse_long(arg(req, "baud"), 0, NULL);
@@ -128,7 +136,7 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
             return;
         }
         if (pwr > 0 && !pr_bandplan_tx_allowed(cfg->bandplan, freq,
-                                               ch->modes & cfg->mode ? cfg->mode : PR_BAND_FM,
+                                               ch->modes & mode_bit ? mode_bit : PR_BAND_FM,
                                                pwr, err, sizeof err)) {
             json_err(res, err);
             return;
@@ -138,6 +146,7 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
     ini_set(cfg->raw, "radio", "driver", driver);
     ini_set(cfg->raw, "radio", "port", arg(req, "port"));
     ini_set(cfg->raw, "radio", "duplex", duplex);
+    ini_set(cfg->raw, "radio", "mode", mode);
     if (baud >= 300 && baud <= 4000000)
         ini_set_int(cfg->raw, "radio", "baud", baud);
     if (freq > 0)

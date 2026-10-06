@@ -197,42 +197,78 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "  <div class=\"status\">\n");
 
     /*
-     * Station tabs: <frequency>@<radio baud rate>, read from the INI.
-     * Deliberately no device path and no callsign - the path depends
-     * on the installation, the callsign lives in the admin area.
-     */
-    pr_buf_add(out, "    <nav class=\"station-tabs\" id=\"station-tabs\">\n");
-    /*
-     * "All" comes before the station tabs and shows EVERYTHING heard
-     * on the channel - every broadcast, every foreign conversation.
-     * Only banned stations stay outside.
+     * Operating controls: whom to call, and with which device.
      *
-     * The tabs next to it show ONLY what is addressed to that
-     * station. Every message in "All" names the device that picked
-     * it up.
+     * The RX/TX menu replaces BOTH earlier controls - the station tabs
+     * up here and the device menu in the send bar. The choice existed
+     * twice, and that was the confusion. One menu now decides reception
+     * filter and transmitting device at the same time:
+     *
+     *   All          hear every device; CQ/broadcast goes out over the
+     *                device chosen in the CQ menu
+     *   <device>     hear this device, transmit with it
+     *
+     * Entry format: <devicename>@<frequency>@<radio baud>Baud - the
+     * name, because the two TNCs differ in modem and rate, and the
+     * rate is what decides whether they understand each other.
      */
+    pr_buf_add(out, "  <div class=\"opctl\">\n");
     pr_buf_add(out,
-        "      <button type=\"button\" class=\"stab is-active\" data-station=\"\">"
-        "All</button>\n");
+        "    <label class=\"call-lbl\" for=\"callto\" title=\"Station to call\">"
+        "CALL:</label>\n"
+        "    <input class=\"call-input\" type=\"text\" id=\"callto\" name=\"callto\" "
+        "placeholder=\"CQ\" maxlength=\"9\" spellcheck=\"false\" "
+        "autocapitalize=\"characters\" autocomplete=\"off\">\n");
+
+    pr_buf_add(out,
+        "    <label class=\"call-lbl\" for=\"rxtx\" "
+        "title=\"All devices or exactly one - reception filter and "
+        "transmitting device in one menu\">"
+        "RX/TX:</label>\n"
+        "    <select id=\"rxtx\" class=\"tx-dev\" title=\"Device\">"
+        "<option value=\"\" selected>All</option>");
     if (cfg->nstations > 0) {
         for (size_t k = 0; k < cfg->nstations; k++) {
             const pr_station *sta = &cfg->stations[k];
             if (!sta->enabled)
                 continue;
-            pr_buf_addf(out,
-                "      <button type=\"button\" class=\"stab\" data-station=\"%s\">"
-                "%.3f@%ld</button>\n",
-                sta->name,
-                cfg->freq_hz / 1000000.0,
-                sta->radio_baud);
+            pr_buf_addf(out, "<option value=\"%s\">%s@%.3f@%ldBaud</option>",
+                        sta->name, sta->name,
+                        st->freq_hz / 1000000.0, sta->radio_baud);
         }
     } else {
-        pr_buf_addf(out,
-            "      <button type=\"button\" class=\"stab\" "
-            "data-station=\"\">%.3f@%ld</button>\n",
-            cfg->freq_hz / 1000000.0, cfg->radio_baud);
+        pr_buf_addf(out, "<option value=\"\">radio@%.3f@%ldBaud</option>",
+                    st->freq_hz / 1000000.0, cfg->radio_baud);
     }
-    pr_buf_add(out, "    </nav>\n");
+    pr_buf_add(out, "</select>\n");
+
+    /*
+     * CQ/broadcast device - shown only under "All". Reception there
+     * runs over every device, so the transmitting device has to be
+     * chosen explicitly: 1200 and 2400 baud are different modems and
+     * do not understand each other.
+     */
+    pr_buf_add(out,
+        "    <label class=\"call-lbl\" id=\"cqlbl\" for=\"cqdev\" "
+        "title=\"CQ / broadcast: which device transmits\">"
+        "CQ:</label>\n"
+        "    <select id=\"cqdev\" class=\"tx-dev\" "
+        "title=\"Device for CQ/broadcast\">");
+    if (cfg->nstations > 0) {
+        for (size_t k = 0; k < cfg->nstations; k++) {
+            const pr_station *sta = &cfg->stations[k];
+            if (!sta->enabled)
+                continue;
+            pr_buf_addf(out, "<option value=\"%s\"%s>%s@%.3f@%ldBaud</option>",
+                        sta->name, k == 0 ? " selected" : "",
+                        sta->name,
+                        st->freq_hz / 1000000.0, sta->radio_baud);
+        }
+    } else {
+        pr_buf_addf(out, "<option value=\"\">radio@%.3f@%ldBaud</option>",
+                    st->freq_hz / 1000000.0, cfg->radio_baud);
+    }
+    pr_buf_add(out, "</select>\n  </div>\n");
 
     pr_buf_add(out, "    <span class=\"chip\"><b>QRG</b> <span class=\"num\" id=\"s-freq\">");
     pr_buf_addf(out, "%.3f MHz", st->freq_hz / 1000000.0);
@@ -308,68 +344,21 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
         : "Half duplex &#8212; no reception while transmitting.");
     pr_buf_add(out, "</div>\n");
 
-    pr_buf_add(out,
-        "<form class=\"txbar\" id=\"txform\" autocomplete=\"off\">\n"
-        "  <label class=\"call-lbl\" for=\"callto\" title=\"Station to call\">"
-        "CALL:</label>\n"
-        "  <input class=\"call-input\" type=\"text\" id=\"callto\" name=\"callto\" "
-        "placeholder=\"CQ\" maxlength=\"9\" spellcheck=\"false\" "
-        "autocapitalize=\"characters\" autocomplete=\"off\">\n");
-
     /*
-     * Transmitting device - a pure SELECTION MENU FOR SENDING.
+     * The send bar carries exactly what is needed to send: the message
+     * line, Send, and the character grid readout on the right.
      *
-     * 1200 and 2400 baud do not understand each other: they are
-     * different modems. So the sender must be chosen explicitly.
-     * Reception is NOT affected by this - it still arrives on all
-     * devices and shows up under "All".
+     * CALL: and the device choice are in the top bar, mode and duplex
+     * are set in the administration - nothing of that appears twice.
      */
     pr_buf_add(out,
-        "  <label class=\"call-lbl\" id=\"txdevlbl\" for=\"txdev\" "
-        "title=\"Which device transmits\">"
-        "TX:</label>\n"
-        "  <select id=\"txdev\" class=\"tx-dev\" title=\"Transmitting device\">");
-    if (cfg->nstations > 0) {
-        for (size_t k = 0; k < cfg->nstations; k++) {
-            const pr_station *sta = &cfg->stations[k];
-            if (!sta->enabled)
-                continue;
-            pr_buf_addf(out, "<option value=\"%s\"%s>%s (%ld)</option>",
-                        sta->name,
-                        k == 0 ? " selected" : "",
-                        sta->name, sta->radio_baud);
-        }
-    } else {
-        pr_buf_addf(out, "<option value=\"\">%ld Baud</option>",
-                    cfg->radio_baud);
-    }
-    pr_buf_add(out, "</select>\n");
-
-    pr_buf_add(out,
+        "<form class=\"txbar\" id=\"txform\" autocomplete=\"off\">\n"
         "  <input class=\"tx-input\" type=\"text\" id=\"txtext\" name=\"text\" "
         "placeholder=\"Enter message &#8230;  [Enter] to send\" "
         "enterkeyhint=\"send\" spellcheck=\"false\">\n"
         "  <button type=\"submit\" class=\"primary\">Send</button>\n"
-        "  <select id=\"selmode\" title=\"Mode\">");
-
-    static const char *const modes[] = { "fm", "am", "ssb" };
-    static const char *const mode_lbl[] = { "FM", "AM", "SSB" };
-    for (size_t i = 0; i < 3; i++) {
-        pr_buf_addf(out, "<option value=\"%s\"%s>%s</option>",
-                    modes[i],
-                    st->mode == pr_band_mode_from_name(modes[i]) ? " selected" : "",
-                    mode_lbl[i]);
-    }
-    pr_buf_add(out, "</select>\n");
-
-    pr_buf_addf(out, "<select id=\"selduplex\" title=\"Duplex\">"
-                     "<option value=\"full\"%s>Full duplex</option>"
-                     "<option value=\"half\"%s>Half duplex</option></select>\n",
-                st->duplex == PR_DUPLEX_FULL ? " selected" : "",
-                st->duplex != PR_DUPLEX_FULL ? " selected" : "");
-
-    pr_buf_add(out, "  <span class=\"chip\" id=\"gridinfo\">&#8212;</span>\n");
-    pr_buf_add(out, "</form>\n");
+        "  <span class=\"chip\" id=\"gridinfo\">&#8212;</span>\n"
+        "</form>\n");
 
     pr_buf_add(out, "</section>\n");
 }
@@ -534,6 +523,18 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
         const char *dl[] = { "Full duplex", "Half duplex" };
         html_select(out, "duplex", dv, dl, 2, pr_duplex_name(cfg->duplex),
                     "Duplex", "");
+    }
+
+    /*
+     * Operating mode FM/AM/SSB. It was a menu in the send bar before;
+     * a mode is a SETTING of the station, not something one changes
+     * between two messages - so it lives here with the rest of them.
+     */
+    {
+        const char *mv[] = { "fm", "am", "ssb" };
+        const char *ml[] = { "FM", "AM", "SSB" };
+        html_select(out, "mode", mv, ml, 3, pr_band_mode_name(cfg->mode),
+                    "Mode", "FM/AM/SSB - checked against the channel");
     }
     html_input_number(out, "freq_hz", cfg->freq_hz, 26565000L, 27405000L,
                       "Frequency (Hz)", "");
@@ -917,11 +918,12 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
     pr_session_from_request(cfg, req, &sess);
 
     /*
-     * Station tabs: the selected station decides WHICH hardware is
-     * used. Without selection the first activated one applies.
+     * RX/TX device selection: the chosen device decides WHICH
+     * hardware is used. Without a selection ("All") the device of the
+     * CQ menu applies, otherwise the first activated station.
      *
-     * This is the core of multi-device operation: every tab stands for
-     * a complete station with its own TNC, radio and antenna.
+     * This is the core of multi-device operation: every station is a
+     * complete unit with its own TNC, radio and antenna.
      */
     const pr_station *station = pr_config_apply_station(
         cfg, pr_req_param(req, "station"));
@@ -952,11 +954,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             /*
              * Broadcast (CQ) is only allowed under "All".
              *
-             * The tabs of a single station stand for DIRECT
-             * communication with one partner. There a destination must
-             * be given - a CQ from a specific station would mean that
-             * this station speaks alone, without the operator deciding
-             * so.
+             * The RX/TX menu with a single device stands for DIRECT
+             * communication with one partner - a destination must be
+             * given there. Under "All" the CQ menu decides which
+             * device transmits the broadcast.
              *
              * The rule deliberately lives here and not in the browser:
              * what the server does not check, nobody keeps.
@@ -967,7 +968,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             if (is_bcast && !bcast_ok) {
                 json_err(res,
                     "broadcast is only allowed under \"All\" - "
-                    "in the station tabs please address a station");
+                    "with a single device please address a station");
                 app_stop(&a);
                 return 0;
             }

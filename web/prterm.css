@@ -206,11 +206,27 @@ body {
 .nav { display: flex; gap: 5px; }
 
 /*
- * Station tabs on the left - deliberately in the SAME style as
- * Terminal / Administration on the right. What is pressed looks the
- * same on both sides: accent color, set-off edge, sunken surface.
+ * Operating controls in the header - CALL:, the RX/TX device menu and
+ * the CQ menu that only exists under "All". The menu entries carry
+ * name, frequency and radio rate: <devicename>@<freq>@<baud>Baud.
+ */
+.opctl {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+/*
+ * Tab strips (Terminal/Mailbox style). Used by the mailbox tabs -
+ * what is pressed looks the same as the navigation on the right:
+ * accent color, set-off edge, sunken surface.
  */
 .station-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
+.station-tabs .stab {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
 .station-tabs .stab {
   font-variant-numeric: tabular-nums;
   letter-spacing: .02em;
@@ -383,24 +399,26 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 .txbar .spacer { flex: 0 0 auto; }
 
-/* Station to call - deliberately placed at the far left before the input. */
-.txbar .call-lbl {
+/* Labels and small inputs - used in the header (CALL:, RX/TX:, CQ:)
+ * and in the mailbox login. */
+.call-lbl {
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .06em;
   color: var(--ink-2, #4a5b78);
   padding-right: 2px;
+  white-space: nowrap;
 }
-.txbar .tx-dev {
+.tx-dev {
   flex: 0 0 auto;
-  padding: 5px 8px;
+  padding: 3px 8px;
   font-variant-numeric: tabular-nums;
 }
-.txbar .call-input {
+.call-input {
   flex: 0 0 5.5em;
   min-width: 5.5em;
-  padding: 5px 8px;
+  padding: 3px 8px;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
   letter-spacing: .04em;
