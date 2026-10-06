@@ -27,7 +27,7 @@ static const char *const probes[] = { "\r", "\x1b" "V\r" };
 
 int main(void)
 {
-    printf("== Muell erkennen ==\n");
+    printf("== detecting garbage ==\n");
     {
         /* At the wrong baud rate garbage arrives - it must not score. */
         unsigned char garbage[] = {
@@ -43,7 +43,7 @@ int main(void)
         CHECK(pr_probe_score(good, strlen((const char *)good)) > 100);
     }
 
-    printf("\n== Zufallstreffer in Muell ==\n");
+    printf("\n== random hits in garbage ==\n");
     {
         /* A word like KISS must not count in garbage.               */
         unsigned char garbage[64];
@@ -55,7 +55,7 @@ int main(void)
         CHECK_INT(pr_probe_score(garbage, sizeof garbage), 0);
     }
 
-    printf("\n== Echo entfernen ==\n");
+    printf("\n== stripping echo ==\n");
     {
         /* Pure echo of the probes      */
         unsigned char echo[64];
@@ -75,7 +75,7 @@ int main(void)
         CHECK(!pr_probe_has_content(echo, after));
     }
 
-    printf("\n== NUL-Bytes brechen das Entfernen nicht ab ==\n");
+    printf("\n== NUL bytes do not stop the removal ==\n");
     {
         /*
          * That was the bug: strstr/strlen stop at NUL. The removal
@@ -94,7 +94,7 @@ int main(void)
         CHECK(!pr_probe_has_content(buf, after));
     }
 
-    printf("\n== Kurze Muster zerstoeren keine laengeren ==\n");
+    printf("\n== short patterns do not destroy longer ones ==\n");
     {
         /*
          * The bare "\r" is not removed (it cannot be told apart from
@@ -110,7 +110,7 @@ int main(void)
         CHECK_INT(pr_probe_remove_bytes(b2, 4, (const unsigned char *)"YZ", 2), 2);
     }
 
-    printf("\n== Echo + echte Antwort ==\n");
+    printf("\n== echo plus a real reply ==\n");
     {
         unsigned char buf[256];
         size_t len = 0;
@@ -131,7 +131,7 @@ int main(void)
         CHECK(pr_probe_score(buf, after) > 100);
     }
 
-    printf("\n== Banner-Erkennung ==\n");
+    printf("\n== banner detection ==\n");
     {
         /* The real criterion for "a TNC speaks here"            */
         const unsigned char *b1 = (const unsigned char *)"TheFirmware NORD V2.7";
@@ -151,7 +151,7 @@ int main(void)
         CHECK(!pr_probe_has_banner(p, strlen((const char *)p)));
     }
 
-    printf("\n== Banner hinter NUL-Bytes ==\n");
+    printf("\n== banner behind NUL bytes ==\n");
     {
         /*
          * That was the third bug of the same kind: the reset sequence
@@ -170,7 +170,7 @@ int main(void)
         CHECK(pr_probe_score(buf, len) > 200);
     }
 
-    printf("\n== Kurze Marker im Muell ==\n");
+    printf("\n== short markers in garbage ==\n");
     {
         /*
          * The marker "TNC" is only three chars long. In random
@@ -194,7 +194,7 @@ int main(void)
         CHECK(pr_probe_has_banner(real, 9));
     }
 
-    printf("\n== Muster-Entfernung allgemein ==\n");
+    printf("\n== pattern removal in general ==\n");
     {
         unsigned char b1[] = "abcXXXdefXXX";
         CHECK_INT(pr_probe_remove_bytes(b1, 12, (const unsigned char *)"XXX", 3), 6);
@@ -209,7 +209,7 @@ int main(void)
         CHECK_INT(pr_probe_remove_bytes(b4, 3, (const unsigned char *)"", 0), 3);
     }
 
-    printf("\n== Leer- und Weissschraum ==\n");
+    printf("\n== empty and whitespace ==\n");
     {
         unsigned char ws[] = { '\r', '\n', ' ', '\t', 0, 0, '\r' };
         CHECK(!pr_probe_has_content(ws, sizeof ws));

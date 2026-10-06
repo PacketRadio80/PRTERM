@@ -50,11 +50,11 @@ int main(void)
     pr_strlcpy(cfg.runtime_dir, TESTDIR, sizeof cfg.runtime_dir);
     cfg.max_log = 50;
 
-    printf("== Laufzeitverzeichnis ==\n");
+    printf("== runtime directory ==\n");
     CHECK_INT(pr_runtime_init(&cfg, err, sizeof err), 0);
     CHECK_INT(access(TESTDIR, F_OK), 0);
 
-    printf("\n== Rig-Zustand ==\n");
+    printf("\n== rig state ==\n");
     {
         pr_rig_state st;
         CHECK_INT(pr_state_load(&cfg, &st, err, sizeof err), 0);
@@ -85,7 +85,7 @@ int main(void)
         CHECK(back.link_ok);
     }
 
-    printf("\n== Log schreiben und lesen ==\n");
+    printf("\n== writing and reading the log ==\n");
     {
         pr_msg m1 = mk(PR_MSG_RX, "DL1ABC", "Guten Morgen", -42);
         pr_msg m2 = mk(PR_MSG_TX, "PRTERM-1", "Hallo zurueck", -6);
@@ -113,7 +113,7 @@ int main(void)
         CHECK_STR(out[2].text, "gestartet");
     }
 
-    printf("\n== Log-Begrenzung ==\n");
+    printf("\n== log limit ==\n");
     {
         for (int k = 0; k < 200; k++) {
             pr_msg m = mk(PR_MSG_RX, "DL1ABC", "test", -50);
@@ -124,7 +124,7 @@ int main(void)
         CHECK_INT(c, 50);            /* exactly max_log, no tolerance */
     }
 
-    printf("\n== Nur die letzten N ==\n");
+    printf("\n== only the last N ==\n");
     {
         pr_msg out[4];
         size_t n = 0;
@@ -132,7 +132,7 @@ int main(void)
         CHECK_INT(n, 4);
     }
 
-    printf("\n== Sonderzeichen im Text ==\n");
+    printf("\n== special characters in text ==\n");
     {
         /* Tabs and line breaks must not break the tabular form             */
         pr_msg m = mk(PR_MSG_RX, "DL1ABC", "mit\ttab\nund\nbruch", -30);
@@ -150,7 +150,7 @@ int main(void)
         }
     }
 
-    printf("\n== Sperre ==\n");
+    printf("\n== locking ==\n");
     {
         int fd = pr_state_lock(&cfg, err, sizeof err);
         CHECK(fd >= 0);

@@ -25,6 +25,7 @@ browser.
 | **Administration** | clickable inside the terminal, **no separate URL** |
 | **Plugins** | transports and features plug in; the mailbox daemon is one of them |
 | **Fonts** | your own `.otf`/`.ttf`, size taken from the INI |
+| **Languages** | the interface speaks the big five — English, Deutsch, Español, Português, Français — switchable in the administration |
 | **Character grid** | as many characters as font size and screen resolution give you — measured, not guessed |
 | **Multiple stations** | several complete stations on one channel, with transmit arbitration |
 | **Platforms** | Linux + FreeBSD on x86-64 and arm64, portable to other systems |

@@ -33,7 +33,7 @@ int main(void)
         CHECK(!kiss_fcs_ok(frame, 1));
     }
 
-    printf("\n== KISS-Escape ==\n");
+    printf("\n== KISS escaping ==\n");
     {
         unsigned char in[]  = { KISS_FEND, KISS_FESC, 0x41 };
         unsigned char out[16];
@@ -46,7 +46,7 @@ int main(void)
         CHECK_INT(out[4], 0x41);
     }
 
-    printf("\n== KISS-Rahmen bauen ==\n");
+    printf("\n== building KISS frames ==\n");
     {
         unsigned char payload[] = { 0x01, 0x02, KISS_FEND, 0x03 };
         unsigned char frame[64];
@@ -82,7 +82,7 @@ int main(void)
         CHECK(memcmp(back, payload, sizeof payload) == 0);
     }
 
-    printf("\n== KISS Mehrere Rahmen ==\n");
+    printf("\n== KISS: several frames ==\n");
     {
         unsigned char stream[256];
         size_t len = 0;
@@ -105,7 +105,7 @@ int main(void)
         CHECK_INT(back[0], 0x33);
     }
 
-    printf("\n== KISS-Parameter ==\n");
+    printf("\n== KISS parameters ==\n");
     {
         unsigned char frame[16];
         unsigned char v = 1;
@@ -115,7 +115,7 @@ int main(void)
         CHECK_INT(frame[2], 1);
     }
 
-    printf("\n== AX.25-UI-Rahmen ==\n");
+    printf("\n== AX.25 UI frames ==\n");
     {
         unsigned char frame[128];
         const char *info = "Hallo";
@@ -142,7 +142,7 @@ int main(void)
         CHECK(memcmp(frame + 16, info, 5) == 0);
     }
 
-    printf("\n== AX.25-Adresse codieren/decodieren ==\n");
+    printf("\n== AX.25 address encode/decode ==\n");
     {
         unsigned char a[7];
         CHECK(call_to_ax25("DL1ABC-1", a));

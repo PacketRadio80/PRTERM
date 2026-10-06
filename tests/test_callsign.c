@@ -19,7 +19,7 @@ int main(void)
     pr_call_rules r;
     pr_call_rules_default(&r);
 
-    printf("== Regeln ==\n");
+    printf("== rules ==\n");
     CHECK_INT(r.callid_max_len, 6);
     CHECK_INT(r.callerid_base_len, 6);
     CHECK_INT(r.callerid_max_total, 8);
@@ -48,7 +48,7 @@ int main(void)
     CHECK(!callerid_valid("DL1ABC-A", &r));   /* SSID not a digit  */
     CHECK(!callerid_valid("", &r));
 
-    printf("\n== SSID-Begrenzung konfigurierbar ==\n");
+    printf("\n== configurable SSID limit ==\n");
     {
         pr_call_rules ax = r;
         ax.ssid_digits = 2;
@@ -63,7 +63,7 @@ int main(void)
         CHECK(callerid_valid("DL1ABC", &nos));
     }
 
-    printf("\n== Normalisierung ==\n");
+    printf("\n== normalization ==\n");
     {
         char buf[16];
         CHECK(callerid_normalize(buf, sizeof buf, "  dl1abc-1  ", &r));
@@ -75,7 +75,7 @@ int main(void)
         CHECK(!callerid_normalize(buf, sizeof buf, "vielzulang-9", &r));
     }
 
-    printf("\n== Zerlegen ==\n");
+    printf("\n== splitting ==\n");
     {
         char base[16];
         int ssid = -2;
@@ -90,7 +90,7 @@ int main(void)
         CHECK(!callerid_split("DL1ABC-", base, sizeof base, &ssid));
     }
 
-    printf("\n== Muster ==\n");
+    printf("\n== patterns ==\n");
     CHECK(call_pattern_match("DL9*", "DL9ABC"));
     CHECK(call_pattern_match("DL9*", "DL9"));
     CHECK(!call_pattern_match("DL9*", "DL8ABC"));
@@ -109,7 +109,7 @@ int main(void)
         CHECK(call_pattern_list_match(pats, 2, "OK1KQ") == NULL);
     }
 
-    printf("\n== AX.25-Wire-Encoding ==\n");
+    printf("\n== AX.25 wire encoding ==\n");
     {
         unsigned char a[7], b[7];
         CHECK(call_to_ax25("DL1ABC", a));

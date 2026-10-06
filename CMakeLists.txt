@@ -101,6 +101,7 @@ set(PRTERM_CORE_SOURCES
     src/bands.c
     src/locator.c
     src/config.c
+    src/lang.c
     src/callsign.c
     src/radio.c
     src/serial.c

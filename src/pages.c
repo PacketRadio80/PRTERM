@@ -12,6 +12,7 @@
 #include "bands.h"
 #include "callsign.h"
 #include "html.h"
+#include "lang.h"
 #include "state.h"
 #include "util.h"
 
@@ -22,6 +23,18 @@
 /* ======================================================================= */
 /* Helpers                                                                 */
 /* ======================================================================= */
+
+/*
+ * Text in the language of the installation ([site] language).
+ *
+ * The English text is the key and the fallback - see lang.h. Every
+ * string the operator can read goes through this, so a language
+ * without a translation degrades to English instead of breaking.
+ */
+static const char *T(const pr_config *cfg, const char *english)
+{
+    return pr_tr(cfg->language, english);
+}
 
 static bool wants_json(const pr_request *req)
 {
@@ -213,20 +226,24 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
      * rate is what decides whether they understand each other.
      */
     pr_buf_add(out, "  <div class=\"opctl\">\n");
-    pr_buf_add(out,
-        "    <label class=\"call-lbl\" for=\"callto\" title=\"Station to call\">"
+    pr_buf_addf(out,
+        "    <label class=\"call-lbl\" for=\"callto\" title=\"%s\">"
         "CALL:</label>\n"
         "    <input class=\"call-input\" type=\"text\" id=\"callto\" name=\"callto\" "
         "placeholder=\"CQ\" maxlength=\"9\" spellcheck=\"false\" "
-        "autocapitalize=\"characters\" autocomplete=\"off\">\n");
+        "autocapitalize=\"characters\" autocomplete=\"off\">\n",
+        T(cfg, "Station to call"));
 
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "    <label class=\"call-lbl\" for=\"rxtx\" "
-        "title=\"All devices or exactly one - reception filter and "
-        "transmitting device in one menu\">"
+        "title=\"%s\">"
         "RX/TX:</label>\n"
-        "    <select id=\"rxtx\" class=\"tx-dev\" title=\"Device\">"
-        "<option value=\"\" selected>All</option>");
+        "    <select id=\"rxtx\" class=\"tx-dev\" title=\"%s\">"
+        "<option value=\"\" selected>%s</option>",
+        T(cfg, "All devices or exactly one - reception filter and "
+               "transmitting device in one menu"),
+        T(cfg, "Device"),
+        T(cfg, "All"));
     if (cfg->nstations > 0) {
         for (size_t k = 0; k < cfg->nstations; k++) {
             const pr_station *sta = &cfg->stations[k];
@@ -248,12 +265,14 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
      * chosen explicitly: 1200 and 2400 baud are different modems and
      * do not understand each other.
      */
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "    <label class=\"call-lbl\" id=\"cqlbl\" for=\"cqdev\" "
-        "title=\"CQ / broadcast: which device transmits\">"
+        "title=\"%s\">"
         "CQ:</label>\n"
         "    <select id=\"cqdev\" class=\"tx-dev\" "
-        "title=\"Device for CQ/broadcast\">");
+        "title=\"%s\">",
+        T(cfg, "CQ / broadcast: which device transmits"),
+        T(cfg, "Device for CQ/broadcast"));
     if (cfg->nstations > 0) {
         for (size_t k = 0; k < cfg->nstations; k++) {
             const pr_station *sta = &cfg->stations[k];
@@ -274,7 +293,8 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     pr_buf_addf(out, "%.3f MHz", st->freq_hz / 1000000.0);
     pr_buf_add(out, "</span></span>\n");
 
-    pr_buf_add(out, "    <span class=\"chip\"><b>Channel</b> <span class=\"num\" id=\"s-channel\">");
+    pr_buf_addf(out, "    <span class=\"chip\"><b>%s</b> <span class=\"num\" id=\"s-channel\">",
+                T(cfg, "Channel"));
     {
         int ch = channel_of(cfg, st->freq_hz);
         if (ch > 0) pr_buf_addf(out, "%d", ch);
@@ -282,35 +302,36 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     }
     pr_buf_add(out, "</span></span>\n");
 
-    pr_buf_add(out, "    <span class=\"chip\"><b>Mode</b> <span id=\"s-mode\">");
+    pr_buf_addf(out, "    <span class=\"chip\"><b>%s</b> <span id=\"s-mode\">",
+                T(cfg, "Mode"));
     pr_html_escape(out, pr_band_mode_name(st->mode));
     pr_buf_add(out, "</span></span>\n");
 
     pr_buf_addf(out,
         "    <span class=\"chip %s\" id=\"s-duplex\">%s</span>\n",
         st->duplex == PR_DUPLEX_FULL ? "is-duplex-full" : "is-duplex-half",
-        st->duplex == PR_DUPLEX_FULL ? "FULL-DUPLEX" : "HALF-DUPLEX");
+        T(cfg, st->duplex == PR_DUPLEX_FULL ? "FULL-DUPLEX" : "HALF-DUPLEX"));
 
     pr_buf_add(out, "  </div>\n");
 
     /* Navigation */
     pr_buf_add(out, "  <nav class=\"nav\">\n");
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "    <button type=\"button\" data-goto=\"terminal\" class=\"is-active\">"
-        "Terminal</button>\n");
+        "%s</button>\n", T(cfg, "Terminal"));
     /*
      * The Mailbox tab exists only when MailboxD is switched on in the INI.
      * At disabled it is not rendered at all - no greyed-out button, no hint.
      * An operator who never installed MailboxD should not be asked about it.
      */
     if (cfg->mailboxd_enabled) {
-        pr_buf_add(out,
+        pr_buf_addf(out,
             "    <button type=\"button\" data-goto=\"mailbox\">"
-            "Mailbox</button>\n");
+            "%s</button>\n", T(cfg, "Mailbox"));
     }
-    pr_buf_add(out,
-        "    <button type=\"button\" data-goto=\"admin\">Administration</button>\n"
-        "  </nav>\n</header>\n");
+    pr_buf_addf(out,
+        "    <button type=\"button\" data-goto=\"admin\">%s</button>\n"
+        "  </nav>\n</header>\n", T(cfg, "Administration"));
 }
 
 /* ======================================================================= */
@@ -320,7 +341,6 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
 static void render_terminal(pr_buf *out, const pr_config *cfg,
                             const pr_rig_state *st)
 {
-    (void)cfg;
     pr_buf_add(out, "<section class=\"view is-active\" data-view=\"terminal\">\n");
 
     /*
@@ -338,11 +358,10 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
     /* Control line */
     pr_buf_add(out, "<div id=\"flash\" class=\"note\" hidden></div>\n");
 
-    pr_buf_add(out, "<div class=\"note\" id=\"duplexnote\">");
-    pr_buf_add(out, st->duplex == PR_DUPLEX_FULL
-        ? "Full duplex &#8212; reception continues while transmitting."
-        : "Half duplex &#8212; no reception while transmitting.");
-    pr_buf_add(out, "</div>\n");
+    pr_buf_addf(out, "<div class=\"note\" id=\"duplexnote\">%s</div>\n",
+        T(cfg, st->duplex == PR_DUPLEX_FULL
+            ? "Full duplex — reception continues while transmitting."
+            : "Half duplex — no reception while transmitting."));
 
     /*
      * The send bar carries exactly what is needed to send: the message
@@ -351,14 +370,16 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
      * CALL: and the device choice are in the top bar, mode and duplex
      * are set in the administration - nothing of that appears twice.
      */
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "<form class=\"txbar\" id=\"txform\" autocomplete=\"off\">\n"
         "  <input class=\"tx-input\" type=\"text\" id=\"txtext\" name=\"text\" "
-        "placeholder=\"Enter message &#8230;  [Enter] to send\" "
+        "placeholder=\"%s\" "
         "enterkeyhint=\"send\" spellcheck=\"false\">\n"
-        "  <button type=\"submit\" class=\"primary\">Send</button>\n"
+        "  <button type=\"submit\" class=\"primary\">%s</button>\n"
         "  <span class=\"chip\" id=\"gridinfo\">&#8212;</span>\n"
-        "</form>\n");
+        "</form>\n",
+        T(cfg, "Enter message &#8230;  [Enter] to send"),
+        T(cfg, "Send"));
 
     pr_buf_add(out, "</section>\n");
 }
@@ -390,25 +411,25 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
     pr_buf_add(out, "<section class=\"view view-invert\" data-view=\"mailbox\">\n");
 
     /* Chrome: brand, tabs, administration - the same shape as the topbar */
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "<header class=\"topbar mbox-bar\">\n"
         "  <div class=\"brand\">\n"
         "    <span class=\"brand-name grad\">MailboxD</span>\n"
-        "    <span class=\"brand-sub\">local mailbox</span>\n"
-        "  </div>\n");
+        "    <span class=\"brand-sub\">%s</span>\n"
+        "  </div>\n", T(cfg, "local mailbox"));
 
     pr_buf_add(out, "    <nav class=\"station-tabs\" id=\"mbox-tabs\">\n");
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "      <button type=\"button\" class=\"stab is-active\" data-mbox=\"term\">"
-        "Terminal</button>\n"
+        "%s</button>\n"
         "      <button type=\"button\" class=\"stab\" data-mbox=\"login\">"
-        "Login</button>\n");
+        "%s</button>\n", T(cfg, "Terminal"), T(cfg, "Login"));
     pr_buf_add(out, "    </nav>\n");
 
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "  <nav class=\"nav\">\n"
-        "    <button type=\"button\" data-mbox=\"admin\">Administration</button>\n"
-        "  </nav>\n</header>\n");
+        "    <button type=\"button\" data-mbox=\"admin\">%s</button>\n"
+        "  </nav>\n</header>\n", T(cfg, "Administration"));
 
     /* Mailbox output - same treatment as the radio terminal */
     pr_buf_add(out,
@@ -422,27 +443,28 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
     /* Local mailbox login - shown when the Login tab is active */
     pr_buf_add(out, "<form class=\"mbox-login\" id=\"mbox-loginform\" "
                     "autocomplete=\"off\" hidden>\n");
-    pr_buf_add(out,
-        "  <label class=\"call-lbl\" for=\"mbox-user\">User:</label>\n"
+    pr_buf_addf(out,
+        "  <label class=\"call-lbl\" for=\"mbox-user\">%s</label>\n"
         "  <input class=\"call-input\" type=\"text\" id=\"mbox-user\" "
         "name=\"user\" maxlength=\"32\" spellcheck=\"false\" "
         "autocomplete=\"username\">\n"
-        "  <label class=\"call-lbl\" for=\"mbox-pass\">Password:</label>\n"
+        "  <label class=\"call-lbl\" for=\"mbox-pass\">%s</label>\n"
         "  <input class=\"call-input\" type=\"password\" id=\"mbox-pass\" "
         "name=\"pass\" autocomplete=\"current-password\">\n"
-        "  <button type=\"submit\" class=\"btn\">Log in</button>\n");
+        "  <button type=\"submit\" class=\"btn\">%s</button>\n",
+        T(cfg, "User:"), T(cfg, "Password:"), T(cfg, "Log in"));
     pr_buf_add(out, "</form>\n");
 
     /* Command line */
-    pr_buf_add(out,
+    pr_buf_addf(out,
         "<form class=\"txbar\" id=\"mbox-form\" autocomplete=\"off\">\n"
         "  <label class=\"call-lbl\" for=\"mbox-cmd\">CMD:</label>\n"
         "  <input class=\"call-input\" type=\"text\" id=\"mbox-cmd\" "
         "name=\"cmd\" spellcheck=\"false\" autocapitalize=\"off\" "
         "autocomplete=\"off\" enterkeyhint=\"send\" "
-        "placeholder=\"mailbox command\">\n"
-        "  <button type=\"submit\" class=\"btn\">Send</button>\n"
-        "</form>\n");
+        "placeholder=\"%s\">\n"
+        "  <button type=\"submit\" class=\"btn\">%s</button>\n"
+        "</form>\n", T(cfg, "mailbox command"), T(cfg, "Send"));
 
     pr_buf_add(out, "</section>\n");
 }
@@ -457,13 +479,17 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "<section class=\"view\" data-view=\"admin\">\n");
 
     if (!sess->valid) {
-        pr_buf_add(out,
-            "<div class=\"card\"><h2 class=\"grad\">Administration</h2>\n"
-            "<p>The admin area is locked. "
-            "Log in directly here in the terminal.</p>\n"
+        pr_buf_addf(out,
+            "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
+            "<p>%s "
+            "%s</p>\n"
             "<div class=\"card-actions\">"
             "<button type=\"button\" class=\"primary\" data-open-login>"
-            "Log in</button></div></div>\n");
+            "%s</button></div></div>\n",
+            T(cfg, "Administration"),
+            T(cfg, "The admin area is locked."),
+            T(cfg, "Log in directly here in the terminal."),
+            T(cfg, "Log in"));
         pr_buf_add(out, "</section>\n");
         return;
     }
@@ -471,32 +497,49 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "<div class=\"cards\">\n");
 
     /* --- General   --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">General</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                     "<h2 class=\"grad\">%s</h2>\n", T(cfg, "General"));
     html_input_hidden(out, "action", "save_site");
     html_csrf(out, sess);
-    html_input_text(out, "site_name", cfg->site_name, "", "Name", "");
-    html_input_text(out, "subtitle", cfg->site_subtitle, "", "Subtitle", "");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+    html_input_text(out, "site_name", cfg->site_name, "", T(cfg, "Name"), "");
+    html_input_text(out, "subtitle", cfg->site_subtitle, "", T(cfg, "Subtitle"), "");
+
+    /*
+     * The language of the interface. The selection is the list PRTERM
+     * actually ships - the big five. Everything else stays English.
+     */
+    {
+        const char *codes[8];
+        const char *names[8];
+        size_t n = 0;
+        for (size_t i = 0; i < pr_lang_count() && n < 8; i++) {
+            codes[n] = pr_lang_code(i);
+            names[n] = pr_lang_name(i);
+            n++;
+        }
+        html_select(out, "language", codes, names, n, cfg->language,
+                    T(cfg, "Language"), T(cfg, "Interface language"));
+    }
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Station --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Station</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Station"));
     html_input_hidden(out, "action", "save_station");
     html_csrf(out, sess);
     html_input_text(out, "callerid", cfg->callerid, "DL1ABC-1", "CALLERID",
-                    "base max. 6 characters + SSID \"-<digit>\", total max. 8");
+                    T(cfg, "base max. 6 characters + SSID \"-<digit>\", total max. 8"));
     html_input_text(out, "qth", cfg->qth, "", "QTH", "");
-    html_input_text(out, "locator", cfg->locator, "", "Locator", "");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+    html_input_text(out, "locator", cfg->locator, "", T(cfg, "Locator"), "");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Radio ---- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Radio</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Radio"));
     html_input_hidden(out, "action", "save_radio");
     html_csrf(out, sess);
 
@@ -511,18 +554,21 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
             lbl[n]  = v->description;
             n++;
         }
-        html_select(out, "driver", vals, lbl, n, cfg->rig_driver, "Driver", "");
+        html_select(out, "driver", vals, lbl, n, cfg->rig_driver,
+                    T(cfg, "Driver"), "");
     }
 
-    html_input_text(out, "port", cfg->port, "/dev/ttyUSB0", "Serial interface",
+    html_input_text(out, "port", cfg->port, "/dev/ttyUSB0",
+                    T(cfg, "Serial interface"),
                     "Linux: /dev/ttyUSB0, /dev/ttyACM0 - FreeBSD: /dev/cuaU0");
-    html_input_number(out, "baud", cfg->baud, 300, 4000000, "Baud rate", "");
+    html_input_number(out, "baud", cfg->baud, 300, 4000000,
+                      T(cfg, "Baud rate"), "");
 
     {
         const char *dv[] = { "full", "half" };
-        const char *dl[] = { "Full duplex", "Half duplex" };
+        const char *dl[] = { T(cfg, "Full duplex"), T(cfg, "Half duplex") };
         html_select(out, "duplex", dv, dl, 2, pr_duplex_name(cfg->duplex),
-                    "Duplex", "");
+                    T(cfg, "Duplex"), "");
     }
 
     /*
@@ -534,38 +580,39 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
         const char *mv[] = { "fm", "am", "ssb" };
         const char *ml[] = { "FM", "AM", "SSB" };
         html_select(out, "mode", mv, ml, 3, pr_band_mode_name(cfg->mode),
-                    "Mode", "FM/AM/SSB - checked against the channel");
+                    T(cfg, "Mode"), T(cfg, "FM/AM/SSB - checked against the channel"));
     }
     html_input_number(out, "freq_hz", cfg->freq_hz, 26565000L, 27405000L,
-                      "Frequency (Hz)", "");
+                      T(cfg, "Frequency (Hz)"), "");
     html_input_number(out, "tx_power_mw", cfg->tx_power_mw, 0, 12000,
-                      "TX power (mW)", "checked against the allocation");
+                      T(cfg, "TX power (mW)"), T(cfg, "checked against the allocation"));
 
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Callsign & bans   --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Callsign</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Callsign"));
     html_input_hidden(out, "action", "save_callsign");
     html_csrf(out, sess);
     html_input_number(out, "callid_max_len", cfg->callsign.callid_max_len, 1, 10,
-                      "CALLID max. length", "");
+                      T(cfg, "CALLID max. length"), "");
     html_input_number(out, "callerid_base_len", cfg->callsign.callerid_base_len, 1, 10,
-                      "CALLERID base", "");
+                      T(cfg, "CALLERID base"), "");
     html_input_number(out, "callerid_max_total", cfg->callsign.callerid_max_total, 1, 16,
-                      "CALLERID total", "6 + 2 = 8 as usual in radio");
+                      T(cfg, "CALLERID total"), T(cfg, "6 + 2 = 8 as usual in radio"));
     html_input_number(out, "callerid_ssid_digits", cfg->callsign.ssid_digits, 0, 2,
-                      "SSID digits", "1 = -0..-9, 2 = -0..-15 (AX.25)");
+                      T(cfg, "SSID digits"), "1 = -0..-9, 2 = -0..-15 (AX.25)");
     html_checkbox(out, "callerid_allow_ssid", cfg->callsign.allow_ssid,
-                  "allow SSID", "");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+                  T(cfg, "allow SSID"), "");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Channel selection ----------- */
-    pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Channel selection</h2>\n");
+    pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n",
+                T(cfg, "Channel selection"));
     pr_buf_add(out, "<div class=\"channels\">");
     if (cfg->bandplan != NULL) {
         for (size_t k = 0; k < cfg->bandplan->nch; k++) {
@@ -579,9 +626,11 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
                 c->num, c->freq_hz / 1000000.0, c->num);
         }
     }
-    pr_buf_add(out, "</div>\n"
-        "<p class=\"hint\">Click a channel to switch. "
-        "<b>&#8727;</b> Gateway &#183; <b>&#9632;</b> data</p></div>\n");
+    pr_buf_addf(out, "</div>\n"
+        "<p class=\"hint\">%s "
+        "<b>&#8727;</b> %s &#183; <b>&#9632;</b> %s</p></div>\n",
+        T(cfg, "Click a channel to switch."),
+        T(cfg, "Gateway"), T(cfg, "data"));
 
     /* --- Device test --- */
     /*
@@ -590,22 +639,28 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
      * carrier is a transmission: it is announced first, and only sent
      * after confirmation.
      */
-    pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Device test</h2>\n"
-        "<p>Sends <b>an empty test carrier for 3 seconds</b> - "
-        "no content, only to check antenna and TX LED.</p>\n"
-        "<p class=\"hint\">This is a radio transmission: it is announced "
-        "first and only sent after confirmation. "
-        "The transmit rules check beforehand whether the channel is clear.</p>\n"
+    pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
+        "<p>%s</p>\n"
+        "<p class=\"hint\">%s</p>\n"
         "<div class=\"card-actions\">"
         "<button type=\"button\" class=\"primary\" id=\"ptttest\">"
-        "3-second test</button> "
+        "%s</button> "
         "<span id=\"pttstate\" class=\"hint\"></span>"
-        "</div></div>\n");
+        "</div></div>\n",
+        T(cfg, "Device test"),
+        T(cfg, "Sends <b>an empty test carrier for 3 seconds</b> - "
+               "no content, only to check antenna and TX LED."),
+        T(cfg, "This is a radio transmission: it is announced "
+               "first and only sent after confirmation. "
+               "The transmit rules check beforehand whether the channel is clear."),
+        T(cfg, "3-second test"));
 
     /* --- Bans --- */
-    pr_buf_add(out, "<div class=\"card\"><h2 class=\"grad\">Blocked stations</h2>\n");
-    pr_buf_add(out, "<table><thead><tr><th>Pattern</th><th>Reason</th><th></th>"
-                    "</tr></thead><tbody>\n");
+    pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n",
+                T(cfg, "Blocked stations"));
+    pr_buf_addf(out, "<table><thead><tr><th>%s</th><th>%s</th><th></th>"
+                    "</tr></thead><tbody>\n",
+                T(cfg, "Pattern"), T(cfg, "Reason"));
     for (size_t i = 0; i < cfg->nbans; i++) {
         pr_buf_add(out, "<tr><td><span class=\"badge badge-ban\">");
         pr_html_escape(out, cfg->bans[i].pattern);
@@ -616,66 +671,71 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
         html_input_hidden(out, "action", "ban_del");
         html_input_hidden(out, "pattern", cfg->bans[i].pattern);
         html_csrf(out, sess);
-        pr_buf_add(out, "<button type=\"submit\" class=\"btn\">Remove</button>"
-                        "</form></td></tr>\n");
+        pr_buf_addf(out, "<button type=\"submit\" class=\"btn\">%s</button>"
+                        "</form></td></tr>\n", T(cfg, "Remove"));
     }
     if (cfg->nbans == 0)
-        pr_buf_add(out, "<tr><td colspan=\"3\" style=\"color:var(--fg-faint)\">"
-                        "no blocks</td></tr>\n");
+        pr_buf_addf(out, "<tr><td colspan=\"3\" style=\"color:var(--fg-faint)\">"
+                        "%s</td></tr>\n", T(cfg, "no blocks"));
     pr_buf_add(out, "</tbody></table>\n");
 
     pr_buf_add(out, "<form method=\"post\" action=\"\" class=\"row\">");
     html_input_hidden(out, "action", "ban_add");
     html_csrf(out, sess);
-    html_input_text(out, "pattern", "", "DL9* or KB1ABC-3", "Pattern",
-                    "wildcards * and ?");
-    html_input_text(out, "reason", "", "", "Reason", "");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\">Block</button></div></form>\n");
+    html_input_text(out, "pattern", "", "DL9* or KB1ABC-3", T(cfg, "Pattern"),
+                    T(cfg, "wildcards * and ?"));
+    html_input_text(out, "reason", "", "", T(cfg, "Reason"), "");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\">%s</button></div></form>\n",
+                T(cfg, "Block"));
     pr_buf_add(out, "</div>\n");
 
     /* --- Font & display        --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Font &amp; display</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Font &amp; display"));
     html_input_hidden(out, "action", "save_ui");
     html_csrf(out, sess);
     html_input_text(out, "font_file", cfg->font_file, "./fonts/prterm.ttf",
-                    "Font file", ".otf or .ttf, relative to prterm.ini");
-    html_input_number(out, "font_size", cfg->font_size, 6, 96, "Font size (px)", "");
+                    T(cfg, "Font file"), T(cfg, ".otf or .ttf, relative to prterm.ini"));
+    html_input_number(out, "font_size", cfg->font_size, 6, 96,
+                      T(cfg, "Font size (px)"), "");
     html_input_number(out, "line_height", cfg->line_height_pct, 100, 300,
-                      "Line height (%)", "120 = 1.2");
+                      T(cfg, "Line height (%)"), "120 = 1.2");
 
     {
         const char *dv[] = { "compact", "normal" };
-        const char *dl[] = { "Compact (maximum text space)", "Normal" };
-        html_select(out, "density", dv, dl, 2, cfg->ui_density, "Density", "");
+        const char *dl[] = { T(cfg, "Compact (maximum text space)"), T(cfg, "Normal") };
+        html_select(out, "density", dv, dl, 2, cfg->ui_density,
+                    T(cfg, "Density"), "");
     }
     {
         const char *dv[] = { "silver", "dark" };
-        const char *dl[] = { "Silver (default)", "Dark" };
-        html_select(out, "theme", dv, dl, 2, cfg->ui_theme, "Color scheme", "");
+        const char *dl[] = { T(cfg, "Silver (default)"), T(cfg, "Dark") };
+        html_select(out, "theme", dv, dl, 2, cfg->ui_theme,
+                    T(cfg, "Color scheme"), "");
     }
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Security   --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Security</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Security"));
     html_input_hidden(out, "action", "pass_change");
     html_csrf(out, sess);
-    html_input_text(out, "old", "", "", "Old password", "");
-    html_input_text(out, "new", "", "", "New password", "");
-    html_input_text(out, "new2", "", "", "Repeat", "");
+    html_input_text(out, "old", "", "", T(cfg, "Old password"), "");
+    html_input_text(out, "new", "", "", T(cfg, "New password"), "");
+    html_input_text(out, "new2", "", "", T(cfg, "Repeat"), "");
     html_checkbox(out, "allow_guest_tx", cfg->allow_guest_tx,
-                  "allow transmitting without login", "");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Change password</button>"
-                    "</div></form>\n");
+                  T(cfg, "allow transmitting without login"), "");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Change password"));
 
     /* --- Raw INI --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Configuration (prterm.ini)</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n",
+                T(cfg, "Configuration (prterm.ini)"));
     html_input_hidden(out, "action", "config_save");
     html_csrf(out, sess);
 
@@ -688,19 +748,21 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
         pr_buf_add(out, "</textarea></div>\n");
         free(dump);
     }
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">Save</button>"
-                    "</div></form>\n");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Session --- */
-    pr_buf_add(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">Session</h2>\n");
+    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Session"));
     html_input_hidden(out, "action", "logout");
     html_csrf(out, sess);
-    pr_buf_addf(out, "<p>Logged in as <b>%s</b></p>\n", "");
+    pr_buf_addf(out, "<p>%s <b>", T(cfg, "Logged in as"));
     pr_html_escape(out, sess->user);
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\">Log out</button></div></form>\n");
+    pr_buf_add(out, "</b></p>\n");
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"submit\">%s</button></div></form>\n",
+                T(cfg, "Log out"));
 
     pr_buf_add(out, "</div>\n</section>\n");
 }
@@ -709,26 +771,31 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
 /* Login dialog                                                            */
 /* ======================================================================= */
 
-static void render_login(pr_buf *out, const pr_session *sess)
+static void render_login(pr_buf *out, const pr_config *cfg, const pr_session *sess)
 {
     (void)sess;
     pr_buf_add(out,
         "<dialog id=\"logindlg\" style=\"border:1px solid var(--line-2);"
         "border-radius:var(--radius);background:var(--panel);color:var(--fg);"
         "padding:18px 20px;min-width:min(340px,90vw)\">\n"
-        "<form id=\"loginform\" method=\"post\" action=\"\">\n"
-        "<h2 class=\"grad\" style=\"margin-top:0\">Log in</h2>\n"
-        "<div id=\"loginmsg\" class=\"note note-err\" hidden></div>\n"
-        "<div class=\"field\"><label>User</label>"
+        "<form id=\"loginform\" method=\"post\" action=\"\">\n");
+    pr_buf_addf(out, "<h2 class=\"grad\" style=\"margin-top:0\">%s</h2>\n",
+                T(cfg, "Log in"));
+    pr_buf_add(out,
+        "<div id=\"loginmsg\" class=\"note note-err\" hidden></div>\n");
+    pr_buf_addf(out, "<div class=\"field\"><label>%s</label>"
         "<input type=\"text\" id=\"loginuser\" name=\"user\" value=\"\" "
-        "placeholder=\"admin\" autocomplete=\"off\" spellcheck=\"false\"></div>\n");
-    pr_buf_add(out, "<div class=\"field\"><label>Password</label>"
+        "placeholder=\"admin\" autocomplete=\"off\" spellcheck=\"false\"></div>\n",
+        T(cfg, "User"));
+    pr_buf_addf(out, "<div class=\"field\"><label>%s</label>"
                     "<input type=\"password\" id=\"loginpass\" name=\"pass\" "
-                    "autocomplete=\"current-password\"></div>\n");
-    pr_buf_add(out, "<div class=\"card-actions\">"
-                    "<button type=\"button\" data-close-login>Cancel</button>"
-                    "<button type=\"submit\" class=\"primary\">Log in</button>"
-                    "</div>\n</form>\n</dialog>\n");
+                    "autocomplete=\"current-password\"></div>\n",
+                T(cfg, "Password"));
+    pr_buf_addf(out, "<div class=\"card-actions\">"
+                    "<button type=\"button\" data-close-login>%s</button>"
+                    "<button type=\"submit\" class=\"primary\">%s</button>"
+                    "</div>\n</form>\n</dialog>\n",
+                T(cfg, "Cancel"), T(cfg, "Log in"));
 }
 
 /* ======================================================================= */
@@ -757,7 +824,49 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
     render_admin(out, cfg, sess, st);
     pr_buf_add(out, "</main>\n</div>\n");
 
-    render_login(out, sess);
+    render_login(out, cfg, sess);
+
+    /*
+     * Texts of the browser script.
+     *
+     * The script cannot ask the server for every word it says, so the
+     * translations travel with the page - one map, English text as the
+     * key, exactly like pr_tr() does it.
+     */
+    {
+        static const char *const js_texts[] = {
+            "MailboxD is not connected — the daemon is not linked yet.",
+            "Please address a station — broadcast only under \"All\".",
+            "sending failed",
+            "Checking …",
+            "Sending …",
+            "test rejected",
+            "TX in %s seconds",
+            "Test finished.",
+            "test failed",
+            "enter user and password",
+            "form incomplete — please reload",
+            "login failed",
+            "FULL-DUPLEX",
+            "HALF-DUPLEX",
+            "Full duplex — reception continues while transmitting.",
+            "Half duplex — no reception while transmitting.",
+            "connected",
+            "disconnected",
+            NULL
+        };
+
+        pr_buf_add(out, "<script>var PRTERM_L={");
+        for (size_t i = 0; js_texts[i] != NULL; i++) {
+            pr_buf_add(out, i > 0 ? "," : "");
+            pr_buf_add(out, "\"");
+            pr_json_escape(out, js_texts[i]);
+            pr_buf_add(out, "\":\"");
+            pr_json_escape(out, T(cfg, js_texts[i]));
+            pr_buf_add(out, "\"");
+        }
+        pr_buf_add(out, "};</script>\n");
+    }
 
     /* Initial data for the script: first log rendering server-side  */
     if (nmsg > 0) {

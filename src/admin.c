@@ -15,6 +15,7 @@
 #include "callsign.h"
 #include "html.h"
 #include "ini.h"
+#include "lang.h"
 #include "radio.h"
 #include "session.h"
 #include "util.h"
@@ -79,7 +80,13 @@ static void act_save_site(pr_request *req, pr_response *res, pr_config *cfg)
 {
     ini_set(cfg->raw, "site", "name", arg(req, "site_name"));
     ini_set(cfg->raw, "site", "subtitle", arg(req, "subtitle"));
-    ini_set(cfg->raw, "site", "language", arg(req, "language"));
+    /* Only a language PRTERM ships - anything else would silently
+     * leave the interface in limbo. */
+    {
+        const char *lang = arg(req, "language");
+        if (lang != NULL && lang[0] != '\0' && pr_lang_supported(lang))
+            ini_set(cfg->raw, "site", "language", lang);
+    }
     if (persist(cfg, res)) json_ok(res);
 }
 

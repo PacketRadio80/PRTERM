@@ -244,7 +244,7 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
         char state_file[640];
         pr_state_path(cfg, state_file, sizeof state_file);
         if (!pr_file_exists(state_file))
-            tnc2_note(r, PR_MSG_SYS, "SYS", "TNC2 angebunden (KISS)");
+            tnc2_note(r, PR_MSG_SYS, "SYS", "TNC2 connected (KISS)");
     }
     return 0;
 }

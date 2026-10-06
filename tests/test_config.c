@@ -60,7 +60,7 @@ int main(void)
     CHECK(d.duplex == PR_DUPLEX_FULL);
     pr_config_free(&d);
 
-    printf("\n== Uebernehmen ==\n");
+    printf("\n== applying ==\n");
     ini *i = ini_parse(INI, err, sizeof err);
     CHECK(i != NULL);
     if (i == NULL) TEST_SUMMARY("config");
@@ -82,7 +82,7 @@ int main(void)
     CHECK_INT(c.font_size, 16);
     CHECK_INT(c.line_height_pct, 130);
 
-    printf("\n== Kanal zu Frequenz ==\n");
+    printf("\n== channel to frequency ==\n");
     CHECK_INT(pr_config_channel(&c), 14);      /* 27.125 MHz = channel 14 */
     CHECK(pr_config_set_channel(&c, 40));
     CHECK_INT(c.freq_hz, 27405000L);
@@ -93,7 +93,7 @@ int main(void)
     CHECK(!pr_config_set_channel(&c, 0));
     CHECK(!pr_config_set_channel(&c, 99));
 
-    printf("\n== Ban-Liste ==\n");
+    printf("\n== ban list ==\n");
     CHECK_INT(c.nbans, 2);
     CHECK(pr_config_is_banned(&c, "DL9ABC"));
     CHECK(pr_config_is_banned(&c, "DL9"));
@@ -110,7 +110,7 @@ int main(void)
     CHECK(!pr_config_is_banned(&c, "OK1KQ"));
     CHECK(!pr_config_del_ban(&c, "OK1*"));     /* again: not present       */
 
-    printf("\n== Ablehnung schlechter Werte ==\n");
+    printf("\n== rejecting bad values ==\n");
     {
         ini *bad = ini_parse("[station]\ncallerid = DL1ABCD-1\n", err, sizeof err);
         pr_config t;
@@ -126,7 +126,7 @@ int main(void)
         ini_free(bad);
     }
 
-    printf("\n== Rueckschreiben ==\n");
+    printf("\n== write-back ==\n");
     {
         ini *out = ini_new();
         pr_config_write(&c, out);

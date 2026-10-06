@@ -20,7 +20,7 @@ int main(void)
 
     printf("Band plan: %s\nSource   : %s\n\n", bp->name, bp->source);
 
-    printf("== Aufbau ==\n");
+    printf("== structure ==\n");
     CHECK_INT(bp->nch, 80);
     CHECK_INT(bp->bw_hz, 10000L);
 
@@ -48,27 +48,27 @@ int main(void)
         CHECK_INT(dup, 0);
     }
 
-    printf("\n== Lage der Bereiche ==\n");
+    printf("\n== placement of the ranges ==\n");
     CHECK_INT(pr_bandplan_channel(bp, 1)->freq_hz,  26965000L);
     CHECK_INT(pr_bandplan_channel(bp, 40)->freq_hz, 27405000L);
     CHECK_INT(pr_bandplan_channel(bp, 41)->freq_hz, 26565000L);
     CHECK_INT(pr_bandplan_channel(bp, 80)->freq_hz, 26955000L);
 
-    printf("\n== Kanaldreher bei 23 ==\n");
+    printf("\n== channel rounding at 23 ==\n");
     CHECK_INT(pr_bandplan_channel(bp, 22)->freq_hz, 27225000L);
     CHECK_INT(pr_bandplan_channel(bp, 23)->freq_hz, 27255000L);
     CHECK_INT(pr_bandplan_channel(bp, 24)->freq_hz, 27235000L);
     CHECK_INT(pr_bandplan_channel(bp, 25)->freq_hz, 27245000L);
     CHECK_INT(pr_bandplan_channel(bp, 26)->freq_hz, 27265000L);
 
-    printf("\n== Luecken im CEPT-Bereich ==\n");
+    printf("\n== gaps in the CEPT range ==\n");
     CHECK(pr_bandplan_at_freq(bp, 26995000L) == NULL);
     CHECK(pr_bandplan_at_freq(bp, 27045000L) == NULL);
     CHECK(pr_bandplan_at_freq(bp, 27095000L) == NULL);
     CHECK(pr_bandplan_at_freq(bp, 27145000L) == NULL);
     CHECK(pr_bandplan_at_freq(bp, 27195000L) == NULL);
 
-    printf("\n== Betriebsarten ==\n");
+    printf("\n== operating modes ==\n");
     {
         int ok = 1;
         for (int n = 1; n <= 40; n++) {
@@ -85,7 +85,7 @@ int main(void)
         CHECK(ok);          /* Ch41..80: FM only */
     }
 
-    printf("\n== Leistungsgrenzen ==\n");
+    printf("\n== power limits ==\n");
     CHECK_INT(pr_bandplan_max_power_mw(bp, 1,  PR_BAND_FM),   4000L);
     CHECK_INT(pr_bandplan_max_power_mw(bp, 1,  PR_BAND_AM),   4000L);
     CHECK_INT(pr_bandplan_max_power_mw(bp, 1,  PR_BAND_SSB), 12000L);
@@ -103,7 +103,7 @@ int main(void)
         CHECK(pr_bandplan_tx_allowed(bp, 26565000L, PR_BAND_FM, 4000L, err, sizeof err));
     }
 
-    printf("\n== Merkmale ==\n");
+    printf("\n== features ==\n");
     {
         static const int data_ch[] = { 6, 7, 24, 25, 52, 53, 76, 77 };
         static const int gw_ch[]   = { 11, 29, 34, 39, 40, 41, 61, 71, 80 };

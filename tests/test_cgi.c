@@ -16,7 +16,7 @@
 
 int main(void)
 {
-    printf("== URL-Kodierung ==\n");
+    printf("== URL encoding ==\n");
     {
         pr_buf b;
         pr_buf_init(&b);
@@ -35,7 +35,7 @@ int main(void)
         CHECK_STR(s, "wert=\xc3\xa4");
     }
 
-    printf("\n== HTML-Escaping ==\n");
+    printf("\n== HTML escaping ==\n");
     {
         pr_buf b;
         pr_buf_init(&b);
@@ -54,7 +54,7 @@ int main(void)
         pr_buf_free(&b);
     }
 
-    printf("\n== JSON-Escaping ==\n");
+    printf("\n== JSON escaping ==\n");
     {
         pr_buf b;
         pr_buf_init(&b);
@@ -84,7 +84,7 @@ int main(void)
         CHECK(!pr_req_cookie(&req, "fehlt", v, sizeof v));
     }
 
-    printf("\n== Schrift-MIME ==\n");
+    printf("\n== font MIME ==\n");
     {
         char mime[32];
         CHECK(html_font_mime("fonts/x.ttf", mime, sizeof mime));
@@ -105,7 +105,7 @@ int main(void)
     CHECK(pr_wildcard_match("a?c", "abc"));
     CHECK(!pr_wildcard_match("a?c", "ac"));
 
-    printf("\n== Puffer ==\n");
+    printf("\n== buffers ==\n");
     {
         pr_buf b;
         pr_buf_init(&b);
@@ -118,7 +118,7 @@ int main(void)
         pr_buf_free(&b);
     }
 
-    printf("\n== Passwort-Hash ==\n");
+    printf("\n== password hash ==\n");
     {
         char hash[160];
         CHECK_INT(pr_hash_password("geheim123", hash, sizeof hash), 0);

@@ -38,6 +38,15 @@
     return Array.prototype.slice.call((root || document).querySelectorAll(sel));
   }
 
+  /*
+   * Text in the language of the installation. The page carries the
+   * translations with it (PRTERM_L), English is the key and the
+   * fallback - exactly like pr_tr() on the server.
+   */
+  function L(s) {
+    return (window.PRTERM_L && window.PRTERM_L[s]) || s;
+  }
+
   /* ----------------------------------------------------------------------
      Character grid: as many characters as font size and resolution allow
      ---------------------------------------------------------------------- */
@@ -113,7 +122,7 @@
   }
 
   function mboxNotConnected() {
-    mboxFlash("MailboxD is not connected — the daemon is not linked yet.", "warn");
+    mboxFlash(L("MailboxD is not connected — the daemon is not linked yet."), "warn");
   }
 
   function sendMailboxCmd() {
@@ -230,21 +239,21 @@
     var d = $("s-duplex");
     if (d) {
       var full = s.duplex === "full";
-      d.textContent = full ? "FULL-DUPLEX" : "HALF-DUPLEX";
+      d.textContent = L(full ? "FULL-DUPLEX" : "HALF-DUPLEX");
       d.className = "chip " + (full ? "is-duplex-full" : "is-duplex-half");
     }
 
     var l = $("s-link");
     if (l) {
-      l.textContent = s.link_ok ? (s.device || "connected") : "disconnected";
+      l.textContent = s.link_ok ? (s.device || L("connected")) : L("disconnected");
       l.className = "chip " + (s.link_ok ? "is-link-ok" : "is-link-bad");
     }
 
     var note = $("duplexnote");
     if (note) {
-      note.textContent = s.duplex === "full"
+      note.textContent = L(s.duplex === "full"
         ? "Full duplex — reception continues while transmitting."
-        : "Half duplex — no reception while transmitting.";
+        : "Half duplex — no reception while transmitting.");
       note.className = "note " + (s.duplex === "full" ? "note-ok" : "note-warn");
     }
   }
@@ -321,7 +330,7 @@
      */
     var isAll = !S.rxtx;
     if (!isAll && (!to || to === "CQ")) {
-      flash("Please address a station \u2013 broadcast only under \"All\".", "warn");
+      flash(L("Please address a station — broadcast only under \"All\"."), "warn");
       if (call) call.focus();
       return;
     }
@@ -330,7 +339,7 @@
     if (isAll) payload.bcast = "1";
 
     post(payload, function (j) {
-      if (j && j.ok === false) flash(j.error || "sending failed", "err");
+      if (j && j.ok === false) flash(j.error || L("sending failed"), "err");
       input.value = "";
       input.focus();
       refresh(true);
@@ -352,16 +361,16 @@
 
     /* Stage 1: announce. Sends nothing yet.         */
     pttBusy = true;
-    if (out) out.textContent = "Checking \u2026";
+    if (out) out.textContent = L("Checking …");
     post({ action: "ptt", run: "0" }, function (j) {
       if (!j || j.ok !== true) {
         if (out) out.textContent = "";
-        flash((j && j.error) || "test rejected", "err");
+        flash((j && j.error) || L("test rejected"), "err");
         pttBusy = false;
         return;
       }
       var wait = j.wait || 3;
-      if (out) out.textContent = j.announce || ("TX in " + wait + " seconds");
+      if (out) out.textContent = j.announce || L("TX in %s seconds").replace("%s", wait);
 
       /* Countdown - abort stays possible.    */
       var left = wait;
@@ -369,13 +378,13 @@
         left--;
         if (left <= 0) {
           clearInterval(tick);
-          if (out) out.textContent = "Sending \u2026";
+          if (out) out.textContent = L("Sending …");
           /* Stage 2: only now something goes on the air. */
           post({ action: "ptt", run: "1" }, function (k) {
             pttBusy = false;
             if (out) out.textContent = k && k.ok === true
-              ? "Test finished." : "";
-            if (k && k.ok === false) flash(k.error || "test failed", "err");
+              ? L("Test finished.") : "";
+            if (k && k.ok === false) flash(k.error || L("test failed"), "err");
             refresh(true);
           });
         } else if (out) {
@@ -574,12 +583,12 @@
         e.preventDefault();
         var uEl = $("loginuser"), pEl = $("loginpass");
         if (!uEl || !pEl) {
-          flash("form incomplete - please reload", "err");
+          flash(L("form incomplete — please reload"), "err");
           return;
         }
         var u = uEl.value, p = pEl.value;
         if (!u || !p) {
-          flash("enter user and password", "warn");
+          flash(L("enter user and password"), "warn");
           return;
         }
         post({ action: "login", user: u, pass: p }, function (j) {
@@ -587,7 +596,7 @@
             closeLogin();
             location.reload();
           } else {
-            flash((j && j.error) || "login failed", "err");
+            flash((j && j.error) || L("login failed"), "err");
           }
         });
       });

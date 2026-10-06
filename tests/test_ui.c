@@ -10,6 +10,8 @@
  *     and nothing that lives elsewhere
  *   - FM/AM/SSB and duplex are administration settings
  *   - the Mailbox tab exists only when MailboxD is enabled
+ *   - the interface speaks the big five (en, de, es, pt, fr) and an
+ *     unknown language falls back to English
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -17,6 +19,7 @@
 
 #include "config.h"
 #include "html.h"
+#include "lang.h"
 #include "pages.h"
 #include "radio.h"
 #include "session.h"
@@ -75,6 +78,38 @@ static bool write_ini(void)
 
     fclose(f);
     return true;
+}
+
+/*
+ * Render the page in one language and look for two markers: the label
+ * of the Send button and the heading of the administration. That is
+ * enough to tell the five languages - and English - apart.
+ */
+static void check_language(pr_config *cfg, const pr_session *sess,
+                           const pr_rig_state *st, const char *code,
+                           const char *send_word, const char *admin_word)
+{
+    pr_strlcpy(cfg->language, code, sizeof cfg->language);
+
+    pr_buf out;
+    pr_buf_init(&out);
+    page_render(&out, cfg, sess, st, NULL, 0, NULL, NULL);
+    const char *html = out.data != NULL ? out.data : "";
+
+    char send_btn[80], admin_h2[80];
+    snprintf(send_btn, sizeof send_btn, ">%s</button>", send_word);
+    snprintf(admin_h2, sizeof admin_h2, "<h2 class=\"grad\">%s</h2>", admin_word);
+
+    pr_test_checks++;
+    bool ok = strstr(html, send_btn) != NULL && strstr(html, admin_h2) != NULL;
+    printf("  %s language %s: %s / %s (%s:%d)\n",
+           ok ? "ok  " : "FAIL", code, send_word, admin_word,
+           __FILE__, __LINE__);
+    if (!ok) {
+        pr_test_fails++;
+        printf("       want \"%s\" and \"%s\"\n", send_btn, admin_h2);
+    }
+    pr_buf_free(&out);
 }
 
 int main(void)
@@ -184,6 +219,54 @@ int main(void)
     html = out.data != NULL ? out.data : "";
     CHECK(strstr(html, "admin area is locked") != NULL);
     CHECK(strstr(html, "<select name=\"mode\">") == NULL);
+
+    /* ---- Languages: the big five ----------------------------------- */
+    printf("\n== Languages ==\n");
+    CHECK_INT(pr_lang_count(), 5);
+    CHECK(pr_lang_supported("en") && pr_lang_supported("DE") &&
+          pr_lang_supported("Es") && pr_lang_supported("pt") &&
+          pr_lang_supported("fr"));
+    CHECK(!pr_lang_supported("xx") && !pr_lang_supported(NULL));
+    CHECK_STR(pr_tr("de", "Send"), "Senden");
+    CHECK_STR(pr_tr("es", "Send"), "Enviar");
+    CHECK_STR(pr_tr("pt", "Send"), "Enviar");
+    CHECK_STR(pr_tr("fr", "Send"), "Envoyer");
+    CHECK_STR(pr_tr("xx", "Send"), "Send");       /* unknown: English  */
+    CHECK_STR(pr_tr("de", "not in the catalog"), "not in the catalog");
+
+    /* second marker: the heading "General" of the administration     */
+    check_language(&cfg, &admin, &st, "de", "Senden", "Allgemein");
+    check_language(&cfg, &admin, &st, "es", "Enviar", "General");
+    check_language(&cfg, &admin, &st, "pt", "Enviar", "Geral");
+    check_language(&cfg, &admin, &st, "fr", "Envoyer", "Général");
+    check_language(&cfg, &admin, &st, "en", "Send", "General");
+    check_language(&cfg, &admin, &st, "xx", "Send", "General");
+
+    /* the selection offers exactly the languages PRTERM ships, and the
+     * translations travel with the page for the browser script */
+    {
+        static const char *const codes[] = { "en", "de", "es", "pt", "fr" };
+
+        pr_strlcpy(cfg.language, "en", sizeof cfg.language);
+        pr_buf_free(&out);
+        pr_buf_init(&out);
+        page_render(&out, &cfg, &admin, &st, NULL, 0, NULL, NULL);
+        html = out.data != NULL ? out.data : "";
+        CHECK(strstr(html, "<select name=\"language\">") != NULL);
+        for (size_t i = 0; i < 5; i++) {
+            char opt[64];
+            snprintf(opt, sizeof opt, "<option value=\"%s\"", codes[i]);
+            CHECK(strstr(html, opt) != NULL);
+        }
+        CHECK(strstr(html, "var PRTERM_L={") != NULL);
+
+        pr_strlcpy(cfg.language, "de", sizeof cfg.language);
+        pr_buf_free(&out);
+        pr_buf_init(&out);
+        page_render(&out, &cfg, &admin, &st, NULL, 0, NULL, NULL);
+        html = out.data != NULL ? out.data : "";
+        CHECK(strstr(html, "Senden fehlgeschlagen") != NULL);   /* JS map */
+    }
 
     pr_buf_free(&out);
     pr_config_free(&cfg);

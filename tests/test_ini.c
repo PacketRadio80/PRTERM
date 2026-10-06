@@ -33,7 +33,7 @@ int main(void)
 {
     char err[256];
 
-    printf("== INI lesen ==\n");
+    printf("== reading the INI ==\n");
     ini *i = ini_parse(SRC, err, sizeof err);
     CHECK(i != NULL);
     if (i == NULL) TEST_SUMMARY("ini");
@@ -47,7 +47,7 @@ int main(void)
     /* Keys and sections are case-insensitive        */
     CHECK_STR(ini_get(i, "SITE", "NAME", "?"), "PRTERM");
 
-    printf("\n== INI schreiben ==\n");
+    printf("\n== writing the INI ==\n");
     ini_set(i, "radio", "duplex", "half");     /* change existing value    */
     ini_set_int(i, "radio", "rx_poll_ms", 250); /* new key                 */
     ini_set(i, "admin", "user", "admin");       /* new section             */
@@ -90,7 +90,7 @@ int main(void)
         ini_free(j);
     }
 
-    printf("\n== Schlechtes Eingabematerial ==\n");
+    printf("\n== bad input ==\n");
     {
         ini *k = ini_parse("nur text ohne format\n[tiefe\nkey ohne wert\n",
                            err, sizeof err);

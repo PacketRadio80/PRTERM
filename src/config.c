@@ -7,6 +7,7 @@
 #include "prterm_compat.h"
 
 #include "config.h"
+#include "lang.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -171,6 +172,10 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     copy_str(cfg->site_name, sizeof cfg->site_name, i, "site", "name", "PRTERM");
     copy_str(cfg->site_subtitle, sizeof cfg->site_subtitle, i, "site", "subtitle", "");
     copy_str(cfg->language, sizeof cfg->language, i, "site", "language", "en");
+    pr_lower(cfg->language);
+    /* Only what PRTERM ships - see lang.h. Everything else stays English. */
+    if (!pr_lang_supported(cfg->language))
+        pr_strlcpy(cfg->language, "en", sizeof cfg->language);
 
     /* [station] */
     copy_str(cfg->qth, sizeof cfg->qth, i, "station", "qth", "");
