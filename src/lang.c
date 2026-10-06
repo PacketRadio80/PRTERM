@@ -19,6 +19,8 @@
 #include "lang.h"
 #include "util.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ======================================================================= */
@@ -457,6 +459,84 @@ static const pr_lang_entry catalog[] = {
     E("transmitting requires login",
       "zum Senden ist eine Anmeldung nötig", "para transmitir se requiere iniciar sesión",
       "para transmitir é necessário iniciar sessão", "l'émission nécessite une connexion"),
+
+    /* ---- Band plan and device drivers ------------------------------- */
+    E("no band plan active",
+      "kein Bandplan aktiv", "ningún plan de banda activo",
+      "nenhum plano de banda ativo", "aucun plan de bandes actif"),
+    E("invalid frequency",
+      "ungültige Frequenz", "frecuencia no válida",
+      "frequência inválida", "fréquence invalide"),
+    E("frequency %ld Hz is not on an allocated channel (%s)",
+      "Frequenz %ld Hz liegt nicht auf einem zugewiesenen Kanal (%s)",
+      "la frecuencia %ld Hz no está en un canal asignado (%s)",
+      "a frequência %ld Hz não está num canal atribuído (%s)",
+      "la fréquence %ld Hz n'est pas sur un canal attribué (%s)"),
+    E("channel %d (%ld Hz): only FM/PM allowed (national extension range), not %s",
+      "Kanal %d (%ld Hz): nur FM/PM erlaubt (nationale Erweiterung), nicht %s",
+      "canal %d (%ld Hz): solo se permite FM/PM (extensión nacional), no %s",
+      "canal %d (%ld Hz): apenas FM/PM permitido (extensão nacional), não %s",
+      "canal %d (%ld Hz) : seul FM/PM est autorisé (extension nationale), pas %s"),
+    E("channel %d (%ld Hz): %s is not allowed, allowed are %s",
+      "Kanal %d (%ld Hz): %s ist nicht erlaubt, erlaubt sind %s",
+      "canal %d (%ld Hz): %s no está permitido, permitidos son %s",
+      "canal %d (%ld Hz): %s não é permitido, permitidos são %s",
+      "canal %d (%ld Hz) : %s n'est pas autorisé, autorisés : %s"),
+    E("channel not found",
+      "Kanal nicht gefunden", "canal no encontrado",
+      "canal não encontrado", "canal introuvable"),
+    E("no power limit for channel %d / %s",
+      "keine Leistungsgrenze für Kanal %d / %s", "sin límite de potencia para el canal %d / %s",
+      "sem limite de potência para o canal %d / %s", "aucune limite de puissance pour le canal %d / %s"),
+    E("power %ld mW exceeds %ld mW (channel %d, %s)",
+      "Leistung %ld mW überschreitet %ld mW (Kanal %d, %s)",
+      "la potencia %ld mW supera %ld mW (canal %d, %s)",
+      "a potência %ld mW excede %ld mW (canal %d, %s)",
+      "la puissance %ld mW dépasse %ld mW (canal %d, %s)"),
+    E("TNC not connected",
+      "TNC nicht verbunden", "TNC no conectado", "TNC não ligado", "TNC non connecté"),
+    E("empty message",
+      "leere Nachricht", "mensaje vacío", "mensagem vazia", "message vide"),
+    E("frame could not be built",
+      "Rahmen konnte nicht gebaut werden", "no se pudo construir la trama",
+      "não foi possível construir a trama", "impossible de construire la trame"),
+    E("KISS frame too large",
+      "KISS-Rahmen zu groß", "trama KISS demasiado grande",
+      "trama KISS demasiado grande", "trame KISS trop grande"),
+    E("message too long",
+      "Nachricht zu lang", "mensaje demasiado largo",
+      "mensagem demasiado comprida", "message trop long"),
+    E("test frame could not be built",
+      "Testrahmen konnte nicht gebaut werden", "no se pudo construir la trama de prueba",
+      "não foi possível construir a trama de teste", "impossible de construire la trame de test"),
+    E("duration must be between 1 and 10 seconds",
+      "die Dauer muss zwischen 1 und 10 Sekunden liegen",
+      "la duración debe estar entre 1 y 10 segundos",
+      "a duração deve estar entre 1 e 10 segundos",
+      "la durée doit être comprise entre 1 et 10 secondes"),
+    E("line format \"%s\" is invalid (e.g. 8n1)",
+      "Zeilenformat \"%s\" ist ungültig (z. B. 8n1)",
+      "el formato de línea \"%s\" no es válido (p. ej. 8n1)",
+      "o formato de linha \"%s\" não é válido (p. ex. 8n1)",
+      "le format de ligne \"%s\" n'est pas valide (p. ex. 8n1)"),
+    E("simulation not connected",
+      "Simulation nicht verbunden", "simulación no conectada",
+      "simulação não ligada", "simulation non connectée"),
+    E("simulation not open",
+      "Simulation nicht offen", "simulación no abierta",
+      "simulação não aberta", "simulation non ouverte"),
+    E("TX in %d seconds - empty test carrier",
+      "TX in %d Sekunden - leere Testträgerwelle", "TX en %d segundos - portadora de prueba vacía",
+      "TX em %d segundos - portadora de teste vazia", "Émission dans %d secondes - porteuse de test vide"),
+    E("unknown channel %s",
+      "unbekannter Kanal %s", "canal desconocido %s",
+      "canal desconhecido %s", "canal inconnu %s"),
+    E("unknown mode",
+      "unbekannte Betriebsart", "modo desconocido",
+      "modo desconhecido", "mode inconnu"),
+    E("%.3f MHz is not on an allocated channel",
+      "%.3f MHz liegt nicht auf einem zugewiesenen Kanal", "%.3f MHz no está en un canal asignado",
+      "%.3f MHz não está num canal atribuído", "%.3f MHz n'est pas sur un canal attribué"),
 };
 #define CATALOG_COUNT (sizeof catalog / sizeof catalog[0])
 
@@ -503,6 +583,54 @@ bool pr_lang_supported(const char *lang)
             return true;
     }
     return false;
+}
+
+/* ======================================================================= */
+/* Language of the current request                                         */
+/* ======================================================================= */
+
+/*
+ * Layers like the band plan or the device drivers produce messages
+ * without a configuration at hand. The language of the request is
+ * therefore set once per request and used by pr_trs()/pr_trf().
+ */
+static char g_lang[8] = "en";
+
+void pr_lang_set(const char *lang)
+{
+    if (pr_lang_supported(lang))
+        pr_strlcpy(g_lang, lang, sizeof g_lang);
+    else
+        pr_strlcpy(g_lang, "en", sizeof g_lang);
+}
+
+const char *pr_trs(const char *text)
+{
+    return pr_tr(g_lang, text);
+}
+
+int pr_trf(char *dst, size_t dstlen, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    /*
+     * The format string is a CATALOG entry, not attacker input - the
+     * translations are written together with the code and kept in the
+     * same order of placeholders. The non-literal format check cannot
+     * see that, so it is switched off exactly here and nowhere else.
+     */
+#if defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wformat-nonliteral"
+#endif
+    int n = vsnprintf(dst, dstlen, pr_tr(g_lang, fmt), ap);
+#if defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
+
+    va_end(ap);
+    return n;
 }
 
 size_t pr_lang_count(void)

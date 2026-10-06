@@ -15,6 +15,7 @@
 #include "prterm_compat.h"
 
 #include "radio.h"
+#include "lang.h"
 #include "state.h"
 #include "util.h"
 
@@ -138,7 +139,7 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
 {
     sim_impl *s = calloc(1, sizeof *s);
     if (s == NULL) {
-        snprintf(err, errlen, "out of memory");
+        pr_trf(err, errlen, "out of memory");
         return -1;
     }
 
@@ -191,7 +192,7 @@ static int sim_refresh(pr_rig *r, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -257,7 +258,7 @@ static int sim_set_freq(pr_rig *r, long freq_hz, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -270,7 +271,7 @@ static int sim_set_mode(pr_rig *r, unsigned mode, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -283,13 +284,13 @@ static int sim_set_ptt(pr_rig *r, bool on, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
 
     if (on && s->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        pr_trf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
 
@@ -310,7 +311,7 @@ static int sim_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -324,7 +325,7 @@ static int sim_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -344,16 +345,16 @@ static int sim_send(pr_rig *r, const char *from, const char *to,
     (void)to;   /* The destination is irrelevant for this driver */
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not open");
+        pr_trf(err, errlen, "simulation not open");
         return -1;
     }
 
     if (s->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        pr_trf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     if (text == NULL || text[0] == '\0') {
-        snprintf(err, errlen, "leere Nachricht");
+        pr_trf(err, errlen, "leere Nachricht");
         return -1;
     }
 
@@ -382,11 +383,11 @@ static int sim_carrier_test(pr_rig *r, unsigned seconds,
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "simulation not connected");
+        pr_trf(err, errlen, "simulation not connected");
         return -1;
     }
     if (seconds == 0 || seconds > 10) {
-        snprintf(err, errlen, "duration must be between 1 and 10 seconds");
+        pr_trf(err, errlen, "duration must be between 1 and 10 seconds");
         return -1;
     }
     (void)errlen;

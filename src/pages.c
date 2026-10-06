@@ -1003,6 +1003,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 {
     const char *action = pr_req_param(req, "action");
 
+    /* The language of this request - layers without a configuration
+     * (band plan, drivers) translate their messages with pr_trs(). */
+    pr_lang_set(cfg->language);
+
     /* ---- Font file    ------------------------------------------------ */
     if (action != NULL && strcmp(action, "font") == 0) {
         char mime[32];
@@ -1116,8 +1120,8 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                     json_err(res, err);
                 } else {
                     char msg[160];
-                    snprintf(msg, sizeof msg,
-                             "TX in %d seconds - empty test carrier", 3);
+                    pr_trf(msg, sizeof msg,
+                            "TX in %d seconds - empty test carrier", 3);
 
                     pr_msg m;
                     memset(&m, 0, sizeof m);
@@ -1187,7 +1191,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 const pr_channel *c =
                     pr_bandplan_channel(cfg->bandplan, atoi(ch));
                 if (c == NULL) {
-                    snprintf(err, sizeof err, "unknown channel %s", ch);
+                    pr_trf(err, sizeof err, "unknown channel %s", ch);
                     ok = false;
                 } else {
                     want_freq = c->freq_hz;
@@ -1199,7 +1203,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 bool num_ok = false;
                 long f = pr_parse_long(fq, 0, &num_ok);
                 if (!num_ok || f <= 0) {
-                    snprintf(err, sizeof err, "invalid frequency");
+                    pr_trf(err, sizeof err, "invalid frequency");
                     ok = false;
                 } else {
                     want_freq = f;
@@ -1210,7 +1214,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             if (ok && md != NULL && md[0] != '\0') {
                 unsigned m = pr_band_mode_from_name(md);
                 if (m == 0) {
-                    snprintf(err, sizeof err, "unknown mode");
+                    pr_trf(err, sizeof err, "unknown mode");
                     ok = false;
                 } else {
                     want_mode = m;

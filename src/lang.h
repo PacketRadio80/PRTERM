@@ -32,6 +32,17 @@
  */
 const char *pr_tr(const char *lang, const char *text);
 
+/*
+ * The same, for layers that have no configuration at hand (band plan,
+ * drivers): pr_lang_set() is called once per request with the
+ * language of the installation, pr_trs()/pr_trf() then use it.
+ * pr_trf() is a snprintf with a TRANSLATED format string - for
+ * messages that carry numbers and names.
+ */
+void pr_lang_set(const char *lang);
+const char *pr_trs(const char *text);
+int  pr_trf(char *dst, size_t dstlen, const char *fmt, ...);
+
 /* Is this language code shipped? ("en", "DE", "Es", ... case-insensitive) */
 bool pr_lang_supported(const char *lang);
 

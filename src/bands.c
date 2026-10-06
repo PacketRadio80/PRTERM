@@ -24,6 +24,7 @@
 #include "prterm_compat.h"
 
 #include "bands.h"
+#include "lang.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -289,17 +290,17 @@ bool pr_bandplan_tx_freq_ok(const pr_bandplan *bp,
                             char *err, size_t errlen)
 {
     if (bp == NULL) {
-        snprintf(err, errlen, "no band plan active");
+        pr_trf(err, errlen, "no band plan active");
         return false;
     }
     if (freq_hz <= 0) {
-        snprintf(err, errlen, "invalid frequency");
+        pr_trf(err, errlen, "invalid frequency");
         return false;
     }
 
     const pr_channel *ch = pr_bandplan_at_freq(bp, freq_hz);
     if (ch == NULL) {
-        snprintf(err, errlen,
+        pr_trf(err, errlen,
                  "frequency %ld Hz is not on an allocated channel (%s)",
                  freq_hz, bp->name);
         return false;
@@ -309,12 +310,12 @@ bool pr_bandplan_tx_freq_ok(const pr_bandplan *bp,
         char mbuf[32];
         pr_band_modes_str(ch->modes, mbuf, sizeof mbuf);
         if (ch->num >= 41 && ch->num <= 80) {
-            snprintf(err, errlen,
+            pr_trf(err, errlen,
                      "channel %d (%ld Hz): only FM/PM allowed (national "
                      "extension range), not %s",
                      ch->num, freq_hz, pr_band_mode_name(mode));
         } else {
-            snprintf(err, errlen,
+            pr_trf(err, errlen,
                      "channel %d (%ld Hz): %s is not allowed, allowed are %s",
                      ch->num, freq_hz, pr_band_mode_name(mode), mbuf);
         }
@@ -334,20 +335,20 @@ bool pr_bandplan_tx_allowed(const pr_bandplan *bp,
 
     const pr_channel *ch = pr_bandplan_at_freq(bp, freq_hz);
     if (ch == NULL) {
-        snprintf(err, errlen, "channel not found");
+        pr_trf(err, errlen, "channel not found");
         return false;
     }
 
     if (power_mw > 0) {
         long max = pr_bandplan_max_power_mw(bp, ch->num, mode);
         if (max == 0) {
-            snprintf(err, errlen,
+            pr_trf(err, errlen,
                      "no power limit for channel %d / %s",
                      ch->num, pr_band_mode_name(mode));
             return false;
         }
         if (power_mw > max) {
-            snprintf(err, errlen,
+            pr_trf(err, errlen,
                      "power %ld mW exceeds %ld mW (channel %d, %s)",
                      power_mw, max, ch->num, pr_band_mode_name(mode));
             return false;

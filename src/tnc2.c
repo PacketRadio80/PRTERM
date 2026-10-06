@@ -33,6 +33,7 @@
 #include "radio.h"
 #include "callsign.h"
 #include "kiss.h"
+#include "lang.h"
 #include "serial.h"
 #include "tncsock.h"
 #include "state.h"
@@ -173,14 +174,14 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
 
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (!pr_serial_parse_line(cfg->serial_line, &databits, &parity, &stopbits)) {
-        snprintf(err, errlen, "line format \"%s\" is invalid (e.g. 8n1)",
+        pr_trf(err, errlen, "line format \"%s\" is invalid (e.g. 8n1)",
                  cfg->serial_line);
         return -1;
     }
 
     tnc2_impl *t = calloc(1, sizeof *t);
     if (t == NULL) {
-        snprintf(err, errlen, "out of memory");
+        pr_trf(err, errlen, "out of memory");
         return -1;
     }
 
@@ -269,7 +270,7 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
 
@@ -315,7 +316,7 @@ static int tnc2_set_freq(pr_rig *r, long freq_hz, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -328,7 +329,7 @@ static int tnc2_set_mode(pr_rig *r, unsigned mode, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -341,12 +342,12 @@ static int tnc2_set_ptt(pr_rig *r, bool on, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
 
     if (on && t->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        pr_trf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     (void)errlen;
@@ -365,7 +366,7 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -394,7 +395,7 @@ static int tnc2_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -413,15 +414,15 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     if (t->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        pr_trf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     if (text == NULL || text[0] == '\0') {
-        snprintf(err, errlen, "empty message");
+        pr_trf(err, errlen, "empty message");
         return -1;
     }
 
@@ -436,7 +437,7 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
     size_t uilen = ax25_ui_frame(ui, sizeof ui, from, to,
                                  (const unsigned char *)text, strlen(text));
     if (uilen == 0) {
-        snprintf(err, errlen, "frame could not be built");
+        pr_trf(err, errlen, "frame could not be built");
         return -1;
     }
 
@@ -445,7 +446,7 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
     unsigned char frame[640];
     size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA, ui, uilen);
     if (flen == 0) {
-        snprintf(err, errlen, "KISS frame too large");
+        pr_trf(err, errlen, "KISS frame too large");
         return -1;
     }
 
@@ -493,15 +494,15 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC not connected");
+        pr_trf(err, errlen, "TNC not connected");
         return -1;
     }
     if (seconds == 0 || seconds > 10) {
-        snprintf(err, errlen, "duration must be between 1 and 10 seconds");
+        pr_trf(err, errlen, "duration must be between 1 and 10 seconds");
         return -1;
     }
     if (t->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        pr_trf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
 
@@ -527,7 +528,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         size_t uilen = ax25_ui_frame(ui, sizeof ui, r->cfg->callerid, "CQ",
                                      pad, TNC2_PACLEN);
         if (uilen == 0) {
-            snprintf(err, errlen, "test frame could not be built");
+            pr_trf(err, errlen, "test frame could not be built");
             return -1;
         }
 
@@ -535,7 +536,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA,
                                   ui, uilen);
         if (flen == 0) {
-            snprintf(err, errlen, "KISS frame too large");
+            pr_trf(err, errlen, "KISS frame too large");
             return -1;
         }
 

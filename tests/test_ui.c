@@ -241,6 +241,21 @@ int main(void)
     CHECK_STR(pr_tr("pt", "transmitting requires login"),
               "para transmitir é necessário iniciar sessão");
 
+    /* layers without a configuration use the language of the request */
+    pr_lang_set("de");
+    CHECK_STR(pr_trs("empty message"), "leere Nachricht");
+    {
+        char msg[160];
+        pr_trf(msg, sizeof msg,
+               "power %ld mW exceeds %ld mW (channel %d, %s)",
+               5000L, 4000L, 24, "FM");
+        CHECK(strstr(msg, "überschreitet") != NULL);
+        CHECK(strstr(msg, "5000") != NULL && strstr(msg, "4000") != NULL);
+    }
+    pr_lang_set("xx");                     /* unknown: back to English */
+    CHECK_STR(pr_trs("empty message"), "empty message");
+    pr_lang_set("en");
+
     /* second marker: the heading "General" of the administration     */
     check_language(&cfg, &admin, &st, "de", "Senden", "Allgemein");
     check_language(&cfg, &admin, &st, "es", "Enviar", "General");

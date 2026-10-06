@@ -136,9 +136,9 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
     if (freq > 0) {
         const pr_channel *ch = pr_bandplan_at_freq(cfg->bandplan, freq);
         if (ch == NULL) {
-            snprintf(err, sizeof err,
-                     "%.3f MHz is not on an allocated channel",
-                     freq / 1000000.0);
+            pr_trf(err, sizeof err,
+                    "%.3f MHz is not on an allocated channel",
+                    freq / 1000000.0);
             json_err(res, err);
             return;
         }
