@@ -1,21 +1,21 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * prterm_compat.h - Feature-Test-Macros.
+ * prterm_compat.h - Feature test macros.
  *
- * MUSS als allererstes in jeder .c-Datei eingebunden werden, also VOR jedem
- * System-Header. Mit strictem -std=c11 (keine GNU-Extensions) verstecken
- * glibc und FreeBSD-Header sonst POSIX-APIs.
+ * MUST be included first in every .c file, i.e. BEFORE every system
+ * header. With strict -std=c11 (no GNU extensions) the glibc and
+ * FreeBSD headers otherwise hide POSIX APIs.
  *
- * Untergrenze ist POSIX.1-2008 - das deckt Linux und FreeBSD auf x86-64
- * und arm64 gleichmaessig ab. Bewusst nicht verwendet:
- *   cfsetspeed()   BSD/GNU, nicht POSIX  -> cfsetispeed + cfsetospeed
- *   cfmakeraw()    BSD/GNU, nicht POSIX  -> Felder von Hand setzen
- *   flock()        BSD, nicht POSIX      -> fcntl(F_SETLK)
- *   getrandom()    Linux-spezifisch      -> /dev/urandom
- *   epoll/kqueue/timerfd                 -> poll()
- *   /proc/self/exe                       -> argv[0]
+ * The lower bound is POSIX.1-2008 - that covers Linux and FreeBSD on
+ * x86-64 and arm64 equally. Deliberately not used:
+ *   cfsetspeed()   BSD/GNU, not POSIX -> cfsetispeed + cfsetospeed
+ *   cfmakeraw()    BSD/GNU, not POSIX -> set fields by hand
+ *   flock()        BSD, not POSIX     -> fcntl(F_SETLK)
+ *   getrandom()    Linux-specific     -> /dev/urandom
+ *   epoll/kqueue/timerfd              -> poll()
+ *   /proc/self/exe                    -> argv[0]
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_COMPAT_H
 #define PRTERM_COMPAT_H
@@ -24,9 +24,9 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
-/* Auf glibc/Linux zusaetzlich die BSD-/Default-Sichtbarkeit einschalten,
- * damit auch von Haus aus BSD-stammende Helfer deklariert sind.
- * Auf FreeBSD ist das ueberfluessig, dort sind die Header ohnehin offen. */
+/* On glibc/Linux additionally enable BSD/default visibility so that
+ * helpers of BSD origin are declared out of the box. On FreeBSD this
+ * is superfluous, there the headers are open anyway. */
 #if defined(__linux__) || defined(__GLIBC__)
 #  ifndef _DEFAULT_SOURCE
 #    define _DEFAULT_SOURCE 1

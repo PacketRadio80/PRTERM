@@ -1,14 +1,14 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * locator.c - Maidenhead-Gitterfeld.
+ * locator.c - Maidenhead grid square.
  *
- * Umrechnung nach dem gaengigen Verfahren:
+ * Conversion by the common method:
  *
- *   Feld    : (lon + 180) / 20  bzw. (lat + 90) / 10
- *   Quadrat : Rest / 2          bzw. Rest / 1
- *   Subsq.  : Rest / (2/24)     bzw. Rest / (1/24)
+ *   field    : (lon + 180) / 20  or (lat + 90) / 10
+ *   square   : remainder / 2     or remainder / 1
+ *   subsq.   : remainder / (2/24) or remainder / (1/24)
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -54,7 +54,7 @@ bool pr_locator6(double lat, double lon, char out[7])
     double lo = lon + 180.0;
     double la = lat + 90.0;
 
-    /* Quadrat */
+    /* Square  */
     int fld_lo = (int)(lo / 20.0);
     int fld_la = (int)(la / 10.0);
     if (fld_lo < 0 || fld_lo > 17 || fld_la < 0 || fld_la > 17)
@@ -66,7 +66,7 @@ bool pr_locator6(double lat, double lon, char out[7])
     int sq_lo = (int)(rem_lo / 2.0);
     int sq_la = (int)rem_la;
 
-    /* Subsquare: 24 x 24 Felder je Quadrat */
+    /* Subsquare: 24 x 24 fields per square */
     double ss_lo = (rem_lo - (double)sq_lo * 2.0) / 2.0 * 24.0;
     double ss_la = (rem_la - (double)sq_la) * 24.0;
 
@@ -132,7 +132,7 @@ bool pr_locator_center(const char *loc, double *lat, double *lon)
         la += (double)(loc[7] - '0') * (1.0 / 24.0 / 10.0);
     }
 
-    /* Mitte des jeweiligen Feldes */
+    /* Center of the respective field */
     double lo_half = (n >= 6) ? (2.0 / 24.0) / 2.0 : 1.0;
     double la_half = (n >= 6) ? (1.0 / 24.0) / 2.0 : 0.5;
 

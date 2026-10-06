@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * tncsock.c - Klientenseite zum TNC-Daemon.
+ * tncsock.c - Client side to the TNC daemon.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -46,7 +46,7 @@ size_t pr_tncsock_hex_decode(unsigned char *dst, size_t dstlen,
         if (*p >= '0' && *p <= '9')      v = *p - '0';
         else if (*p >= 'a' && *p <= 'f') v = *p - 'a' + 10;
         else if (*p >= 'A' && *p <= 'F') v = *p - 'A' + 10;
-        else continue;          /* Trennzeichen ueberspringen */
+        else continue;          /* Skip separators            */
 
         if (hi < 0) {
             hi = v;
@@ -59,13 +59,13 @@ size_t pr_tncsock_hex_decode(unsigned char *dst, size_t dstlen,
     return w;
 }
 
-/* ---- Verbindung ----------------------------------------------------- */
+/* ---- Connection ----------------------------------------------------- */
 
 int pr_tncsock_open(pr_tncsock *c, const char *socket_path,
                     char *err, size_t errlen)
 {
     if (c == NULL || socket_path == NULL) {
-        if (err) snprintf(err, errlen, "kein Socketpfad");
+        if (err) snprintf(err, errlen, "no socket path");
         return -1;
     }
     memset(c, 0, sizeof *c);
@@ -81,7 +81,7 @@ int pr_tncsock_open(pr_tncsock *c, const char *socket_path,
     memset(&sa, 0, sizeof sa);
     sa.sun_family = AF_UNIX;
     if (strlen(socket_path) >= sizeof sa.sun_path) {
-        if (err) snprintf(err, errlen, "Socketpfad zu lang");
+        if (err) snprintf(err, errlen, "socket path too long");
         close(fd);
         return -1;
     }
@@ -89,7 +89,7 @@ int pr_tncsock_open(pr_tncsock *c, const char *socket_path,
 
     if (connect(fd, (struct sockaddr *)&sa, sizeof sa) != 0) {
         if (err) snprintf(err, errlen,
-                          "prterm-tncd nicht erreichbar (%s): %s",
+                          "prterm-tncd not reachable (%s): %s",
                           socket_path, strerror(errno));
         close(fd);
         return -1;
@@ -108,9 +108,9 @@ void pr_tncsock_close(pr_tncsock *c)
     c->fd = -1;
 }
 
-/* ---- Befehle -------------------------------------------------------- */
+/* ---- Commands --------------------------------------------------------- */
 
-/* Liest eine Zeile bis '\n'. Liefert die Laenge ohne Zeilenumbruch. */
+/* Reads one line up to '\n'. Returns the length without the newline. */
 static long read_line(int fd, char *dst, size_t dstlen)
 {
     size_t w = 0;
@@ -134,7 +134,7 @@ int pr_tncsock_cmd(pr_tncsock *c, const char *cmd,
                    char *out, size_t outlen, char *err, size_t errlen)
 {
     if (c == NULL || c->fd < 0) {
-        if (err) snprintf(err, errlen, "keine Verbindung zum Daemon");
+        if (err) snprintf(err, errlen, "no connection to the daemon");
         return -1;
     }
     if (out && outlen > 0)
@@ -143,18 +143,18 @@ int pr_tncsock_cmd(pr_tncsock *c, const char *cmd,
     char line[PR_TNCSOCK_MAX_LINE];
     int n = snprintf(line, sizeof line, "%s\n", cmd);
     if (n <= 0 || (size_t)n >= sizeof line) {
-        if (err) snprintf(err, errlen, "Befehl zu lang");
+        if (err) snprintf(err, errlen, "command too long");
         return -1;
     }
 
     if (write(c->fd, line, (size_t)n) != n) {
-        if (err) snprintf(err, errlen, "Senden an Daemon: %s", strerror(errno));
+        if (err) snprintf(err, errlen, "sending to daemon: %s", strerror(errno));
         return -1;
     }
 
     char resp[PR_TNCSOCK_MAX_LINE];
     if (read_line(c->fd, resp, sizeof resp) <= 0) {
-        if (err) snprintf(err, errlen, "keine Antwort vom Daemon");
+        if (err) snprintf(err, errlen, "no reply from the daemon");
         return -1;
     }
 
@@ -183,7 +183,7 @@ int pr_tncsock_tx(pr_tncsock *c, const unsigned char *data, size_t len,
                   char *err, size_t errlen)
 {
     if (len > 4000) {
-        if (err) snprintf(err, errlen, "Sendepaket zu gross");
+        if (err) snprintf(err, errlen, "TX packet too large");
         return -1;
     }
 
@@ -193,7 +193,7 @@ int pr_tncsock_tx(pr_tncsock *c, const unsigned char *data, size_t len,
     char cmd[PR_TNCSOCK_MAX_LINE];
     int n = snprintf(cmd, sizeof cmd, "%s %s", PR_TNC_CMD_TX, hex);
     if (n <= 0 || (size_t)n >= sizeof cmd) {
-        if (err) snprintf(err, errlen, "Sendepaket zu gross");
+        if (err) snprintf(err, errlen, "TX packet too large");
         return -1;
     }
     return pr_tncsock_cmd(c, cmd, NULL, 0, err, errlen);

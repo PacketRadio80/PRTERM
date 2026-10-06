@@ -2,12 +2,12 @@
  * PRTERM - CB & Amateur Radio Terminal
  * ini.h - INI parser/writer.
  *
- * Eigenschaft, die fuer PRTERM wichtig ist: beim Speichern bleiben
- * Kommentare, Reihenfolge und Einrueckung der prterm.ini erhalten. Die Datei
- * ist die einzige Konfiguration und wird sowohl vom Admin-Bereich als auch
- * von der Shell editiert - ein Neuschreiben duerfte die Doku nicht loeschen.
+ * The property that matters for PRTERM: saving preserves comments,
+ * order and indentation of prterm.ini. The file is the only config
+ * and is edited both from the admin pages and from the shell - a
+ * rewrite must not delete the documentation.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_INI_H
 #define PRTERM_INI_H
@@ -22,10 +22,10 @@ ini  *ini_load(const char *path, char *err, size_t errlen);
 ini  *ini_parse(const char *text, char *err, size_t errlen);
 void  ini_free(ini *i);
 
-/* ---- Zugriff --------------------------------------------------------- */
-/* Sektion "" ist der Bereich vor dem ersten [header].
- * Schluessel- und Sektionsvergleich sind case-insensitiv, die Schreibweise
- * des Originals bleibt erhalten. */
+/* ---- Access  --------------------------------------------------------- */
+/* Section "" is the area before the first [header].
+ * Key and section comparison are case-insensitive, the spelling of
+ * the original is preserved. */
 const char *ini_get(const ini *i, const char *section, const char *key,
                     const char *dflt);
 long        ini_get_int(const ini *i, const char *section, const char *key,
@@ -51,9 +51,9 @@ void ini_foreach(const ini *i, const char *section, ini_iter_fn fn, void *ud);
 bool   ini_has_section(const ini *i, const char *section);
 size_t ini_section_count(const ini *i, const char *section);
 
-/* ---- Ausgabe --------------------------------------------------------- */
+/* ---- Output  --------------------------------------------------------- */
 int   ini_save(const ini *i, const char *path, char *err, size_t errlen);
-/* Serialisiert mit erhaltenen Kommentaren; Aufrufer gibt frei. */
+/* Serializes with comments preserved; caller frees.            */
 char *ini_dump(const ini *i);
 
 #endif /* PRTERM_INI_H */

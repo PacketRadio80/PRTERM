@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * kiss.c - KISS-Framing.
+ * kiss.c - KISS framing.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -15,8 +15,8 @@
 /* ======================================================================= */
 
 /*
- * CRC-16/AX.25: reflektiertes Polynom 0x8408, Init 0xFFFF, Final-XOR 0xFFFF.
- * Bitweise implementiert - portabel und ohne Nachschlagetabelle.
+ * CRC-16/AX.25: reflected polynomial 0x8408, init 0xFFFF, final XOR 0xFFFF.
+ * Implemented bitwise - portable and without a lookup table.
  */
 uint16_t kiss_fcs(const unsigned char *data, size_t len)
 {
@@ -37,13 +37,13 @@ bool kiss_fcs_ok(const unsigned char *frame, size_t len)
 {
     if (frame == NULL || len < 2)
         return false;
-    /* FCS steht am Ende, little-endian */
+    /* FCS is at the end, little-endian */
     uint16_t want = (uint16_t)(frame[len - 2] | ((uint16_t)frame[len - 1] << 8));
     return kiss_fcs(frame, len - 2) == want;
 }
 
 /* ======================================================================= */
-/* Codieren                                                                */
+/* Encoding                                                                */
 /* ======================================================================= */
 
 size_t kiss_escape(unsigned char *out, size_t outcap,
@@ -100,7 +100,7 @@ size_t kiss_encode(unsigned char *out, size_t outcap,
 }
 
 /* ======================================================================= */
-/* Decodieren                                                              */
+/* Decoding                                                                */
 /* ======================================================================= */
 
 void kiss_decoder_init(kiss_decoder *d)
@@ -108,7 +108,7 @@ void kiss_decoder_init(kiss_decoder *d)
     memset(d, 0, sizeof *d);
 }
 
-/* Schliesst den laufenden Rahmen ab und stellt ihn in die Warteschlange. */
+/* Closes the running frame and queues it.                                */
 static bool kiss_push_frame(kiss_decoder *d)
 {
     if (d->curlen == 0) {
@@ -123,7 +123,7 @@ static bool kiss_push_frame(kiss_decoder *d)
         d->done_len[slot] = d->curlen;
         d->qcount++;
     }
-    /* sonst: Rahmen verwerfen, das Geraet sendet schneller als wir lesen */
+    /* else: discard the frame, the device sends faster than we read      */
 
     d->curlen = 0;
     d->in_frame = false;
@@ -137,7 +137,7 @@ bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte)
         if (d->in_frame && d->curlen > 0)
             return kiss_push_frame(d);
 
-        /* neuer Rahmen beginnt */
+        /* new frame starts     */
         d->in_frame = true;
         d->curlen = 0;
         d->esc = false;
@@ -145,7 +145,7 @@ bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte)
     }
 
     if (!d->in_frame)
-        return false;               /* ausserhalb eines Rahmens */
+        return false;               /* outside a frame          */
 
     if (d->esc) {
         d->esc = false;
@@ -157,7 +157,7 @@ bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte)
     }
 
     if (d->curlen == 0) {
-        /* erstes Byte ist die Typangabe */
+        /* first byte is the type byte   */
         d->cmd  = byte & 0x0fu;
         d->port = (unsigned)(byte >> 4);
     }
@@ -187,8 +187,8 @@ size_t kiss_decoder_take(kiss_decoder *d, unsigned char *out, size_t outcap)
         return 0;
 
     /*
-     * Das erste Byte ist die Typangabe - der Nutzen beginnt danach.
-     * Bei DATA ist das der AX.25-Rahmen.
+     * The first byte is the type byte - the payload starts after it.
+     * For DATA that is the AX.25 frame.
      */
     size_t n = d->done_len[d->qhead] > 0 ? d->done_len[d->qhead] - 1 : 0;
     if (n > outcap)

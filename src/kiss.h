@@ -1,15 +1,15 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * kiss.h - KISS-Framing (RFC-artige Uebung, TNC2-Klasse).
+ * kiss.h - KISS framing (RFC-style exercise, TNC2 class).
  *
- *   FEND  0xC0   Rahmenanfang / -ende
- *   FESC  0xDB   Escape
- *   TFEND 0xDC   FEND nach Escape
- *   TFESC 0xDD   FESC nach Escape
+ *   FEND  0xC0   frame start / end
+ *   FESC  0xDB   escape
+ *   TFEND 0xDC   FEND after escape
+ *   TFESC 0xDD   FESC after escape
  *
- * Rahmen:  FEND | (port<<4)|cmd | escaped payload | FEND
+ * Frame:  FEND | (port<<4)|cmd | escaped payload | FEND
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_KISS_H
 #define PRTERM_KISS_H
@@ -23,7 +23,7 @@
 #define KISS_TFEND 0xDCu
 #define KISS_TFESC 0xDDu
 
-/* Kommandos im Nibble high, Port im Nibble low */
+/* Command in the high nibble, port in the low nibble */
 #define KISS_CMD_DATA       0x00u
 #define KISS_CMD_TXDELAY    0x01u
 #define KISS_CMD_PERSIST    0x02u
@@ -31,50 +31,50 @@
 #define KISS_CMD_TXTAIL     0x04u
 #define KISS_CMD_FULLDUPLEX 0x05u
 #define KISS_CMD_SETHARDWARE 0x06u
-#define KISS_CMD_RETURN     0xFFu   /* zurueck in den Command-Mode */
+#define KISS_CMD_RETURN     0xFFu   /* back to command mode        */
 
-/* --- AX.25-FCS ---------------------------------------------------------
- * Reflektiertes Polynom 0x8408, Init 0xFFFF, Final-XOR 0xFFFF.
- * Wird gebraucht, um den FCS vor dem Senden zu entfernen. */
+/* --- AX.25 FCS ---------------------------------------------------------
+ * Reflected polynomial 0x8408, init 0xFFFF, final XOR 0xFFFF.
+ * Needed to strip the FCS before transmitting. */
 uint16_t kiss_fcs(const unsigned char *data, size_t len);
 bool     kiss_fcs_ok(const unsigned char *frame, size_t len);
 
-/* --- Codieren ---------------------------------------------------------- */
+/* --- Encoding ---------------------------------------------------------- */
 /*
- * Baut einen Rahmen. FCS wird NICHT ergaenzt - KISS bekommt den
- * AX.25-Rahmen ohne FCS.
+ * Builds a frame. The FCS is NOT added - KISS gets the AX.25 frame
+ * without FCS.
  *
- *   out      Zielpuffer
- *   outcap   dessen Groesse
+ *   out      target buffer
+ *   outcap   its size
  *   port     0..15
  *   cmd      KISS_CMD_*
- *   payload  Nutzdaten (bei DATA der AX.25-Rahmen ohne FCS)
+ *   payload  payload (for DATA the AX.25 frame without FCS)
  *
- * Liefert die Laenge des Rahmens, 0 wenn der Puffer zu klein ist.
+ * Returns the frame length, 0 if the buffer is too small.
  */
 size_t kiss_encode(unsigned char *out, size_t outcap,
                    unsigned port, unsigned cmd,
                    const unsigned char *payload, size_t plen);
 
-/* Escape-Einzelbytes; liefert die Laenge. */
+/* Escapes individual bytes; returns the length. */
 size_t kiss_escape(unsigned char *out, size_t outcap,
                    const unsigned char *in, size_t inlen);
 
-/* --- Decodieren --------------------------------------------------------
- * Ein Decoder kann mehrere Rahmen aufnehmen, die in EINEM Lesevorgang
- * ankommen. Ein einzelner Zielrahmen wuerde vom naechsten ueberschrieben. */
+/* --- Decoding --------------------------------------------------------
+ * One decoder can hold several frames arriving in ONE read. A single
+ * target frame would be overwritten by the next one. */
 
 #define KISS_MAX_PENDING  8
 #define KISS_FRAME_MAX    640
 
 typedef struct kiss_decoder {
-    /* laufender Rahmen */
+    /* running frame    */
     unsigned char cur[KISS_FRAME_MAX];
     size_t        curlen;
     bool          in_frame;
     bool          esc;
 
-    /* fertige Rahmen */
+    /* finished frames */
     unsigned char done[KISS_MAX_PENDING][KISS_FRAME_MAX];
     size_t        done_len[KISS_MAX_PENDING];
     size_t        qhead;
@@ -86,18 +86,18 @@ typedef struct kiss_decoder {
 
 void kiss_decoder_init(kiss_decoder *d);
 
-/* Fuettert ein Byte. true wenn dadurch ein Rahmen vollstaendig wurde. */
+/* Feeds one byte. True if this completed a frame.                     */
 bool kiss_decoder_feed(kiss_decoder *d, unsigned char byte);
 
-/* Fuettert einen Block. Liefert die Anzahl NEUER vollstaendiger Rahmen. */
+/* Feeds a block. Returns the number of NEW completed frames.            */
 size_t kiss_decoder_feed_buf(kiss_decoder *d, const unsigned char *buf, size_t len);
 
-/* Wie viele Rahmen warten auf Abholung. */
+/* How many frames are waiting for pickup. */
 size_t kiss_decoder_ready(const kiss_decoder *d);
 
 /*
- * Liefert den aeltesten fertigen Rahmen OHNE Typbyte und nimmt ihn aus der
- * Warteschlange. 0 wenn keiner wartet oder der Puffer zu klein ist.
+ * Returns the oldest finished frame WITHOUT the type byte and removes
+ * it from the queue. 0 if none waits or the buffer is too small.
  */
 size_t kiss_decoder_take(kiss_decoder *d, unsigned char *out, size_t outcap);
 

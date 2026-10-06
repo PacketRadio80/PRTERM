@@ -6,7 +6,7 @@
  * sources in web/, so the CGI stays a single self-contained binary:
  * copy prterm.cgi + prterm.ini and it works.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_ASSET_H
 #define PRTERM_ASSET_H

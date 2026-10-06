@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * session.c - Admin-Anmeldung, Sessions und CSRF.
+ * session.c - Admin login, sessions and CSRF.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -21,10 +21,10 @@
 #define PR_COOKIE_NAME "PRTERM_SID"
 
 /* ======================================================================= */
-/* Passwort                                                                */
+/* Password                                                                */
 /* ======================================================================= */
 
-/* sha256 ueber (salt + passwort), PR_HASH_ITER-mal gestreckt. */
+/* sha256 over (salt + password), stretched PR_HASH_ITER times. */
 static void stretch(const char *salt, const char *pass,
                     unsigned char out[PR_SHA256_DIGEST_LEN])
 {
@@ -60,6 +60,23 @@ int pr_hash_password(const char *pass, char *out, size_t outlen)
     return 0;
 }
 
+/*
+ * Constant-time comparison of a C string against a reference. Length
+ * differences are folded in so the loop cannot be used to fish out the
+ * length either. Used for passwords that are compared in the clear.
+ */
+static bool const_time_eq(const char *given, const char *want)
+{
+    if (want == NULL)
+        return false;
+    size_t n = given != NULL ? strlen(given) : 0;
+    size_t m = strlen(want);
+    unsigned char diff = (unsigned char)(n ^ m);
+    for (size_t i = 0; i < m; i++)
+        diff |= (unsigned char)(want[i] ^ (given != NULL && i < n ? given[i] : 0));
+    return diff == 0;
+}
+
 bool pr_verify_password(const char *pass, const char *stored)
 {
     if (pass == NULL || stored == NULL || stored[0] == '\0')
@@ -78,7 +95,7 @@ bool pr_verify_password(const char *pass, const char *stored)
     char got[PR_SHA256_HEX_LEN + 1];
     pr_sha256_to_hex(digest, got);
 
-    /* Konstantzeitiger Vergleich */
+    /* Constant-time comparison   */
     size_t n = strlen(got), m = strlen(want);
     unsigned char diff = (unsigned char)(n ^ m);
     for (size_t i = 0; i < n; i++)
@@ -87,7 +104,7 @@ bool pr_verify_password(const char *pass, const char *stored)
 }
 
 /* ======================================================================= */
-/* Session-Dateien                                                         */
+/* Session files                                                           */
 /* ======================================================================= */
 
 static void session_path(const pr_config *cfg, const char *sid,
@@ -98,7 +115,7 @@ static void session_path(const pr_config *cfg, const char *sid,
     snprintf(dst, dstlen, "%.480s/%.64s", dir, sid);
 }
 
-/* SIDs duerfen nur Hex enthalten - wichtig gegen Pfadangriffe. */
+/* SIDs must contain only hex - important against path attacks. */
 static bool sid_ok(const char *sid)
 {
     if (sid == NULL)
@@ -120,28 +137,32 @@ bool pr_session_login(const pr_config *cfg, const char *user, const char *pass,
     memset(out, 0, sizeof *out);
 
     if (!cfg->admin_enabled) {
-        snprintf(err, errlen, "Der Administrationsbereich ist gesperrt");
-        return false;
-    }
-    if (cfg->admin_pass_hash[0] == '\0') {
-        snprintf(err, errlen,
-                 "Es ist kein Passwort gesetzt. Bitte mit "
-                 "\"prterm.cgi --hash-password\" erzeugen und unter "
-                 "[admin] pass_hash eintragen.");
+        snprintf(err, errlen, "the admin area is locked");
         return false;
     }
 
-    /* Gleiche Meldung fuer Benutzer und Passwort - verrät nicht, was falsch war. */
-    if (user == NULL || !pr_str_eq_ci(user, cfg->admin_user)) {
-        snprintf(err, errlen, "Benutzer oder Passwort stimmt nicht");
-        return false;
-    }
-    if (!pr_verify_password(pass, cfg->admin_pass_hash)) {
-        snprintf(err, errlen, "Benutzer oder Passwort stimmt nicht");
+    /* Same message for user and password - does not reveal what was wrong.       */
+    if (user == NULL || !pr_str_eq_ci(user, cfg->admin_user) ||
+        !pr_auth_check_password(cfg, pass)) {
+        snprintf(err, errlen, "user or password is wrong");
         return false;
     }
 
     return pr_session_create(cfg, user, out, err, errlen) == 0;
+}
+
+bool pr_auth_check_password(const pr_config *cfg, const char *pass)
+{
+    if (cfg == NULL)
+        return false;
+    if (cfg->admin_pass_hash[0] == '\0')
+        return const_time_eq(pass, PR_DEFAULT_ADMIN_PASS);
+    return pr_verify_password(pass, cfg->admin_pass_hash);
+}
+
+bool pr_auth_is_default(const pr_config *cfg)
+{
+    return cfg != NULL && cfg->admin_pass_hash[0] == '\0';
 }
 
 int pr_session_create(const pr_config *cfg, const char *user,
@@ -167,7 +188,7 @@ int pr_session_create(const pr_config *cfg, const char *user,
 
     ini *i = ini_new();
     if (i == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
     ini_set(i, "session", "user", out->user);
@@ -227,8 +248,8 @@ int pr_session_destroy(const pr_config *cfg, const char *sid)
 
 void pr_session_prune(const pr_config *cfg)
 {
-    /* Sessions sind kleine Einzeldateien; abgelaufene werden beim Zugriff
-     * entfernt. Ein voller Verzeichnis-Scan lohnt hier nicht. */
+    /* Sessions are small single files; expired ones are removed on
+     * access. A full directory scan is not worth it here. */
     (void)cfg;
 }
 
@@ -260,7 +281,7 @@ bool pr_session_check_csrf(const pr_session *s, const char *token)
 }
 
 /* ======================================================================= */
-/* Login-Sperre nach Fehlversuchen                                         */
+/* Login lockout after failed attempts                                         */
 /* ======================================================================= */
 
 #define PR_LOGIN_MAX_FAIL 5
@@ -303,7 +324,7 @@ bool pr_login_throttle(const pr_config *cfg, const char *ip)
 
     long v = read_counter(path);
     if (v < 0)
-        return true;                    /* keine Vorgeschichte */
+        return true;                    /* no history          */
     return v < PR_LOGIN_MAX_FAIL;
 }
 

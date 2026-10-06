@@ -7,16 +7,16 @@ project(prterm
 
 # ---------------------------------------------------------------------------
 # Portability baseline
-#   Zielplattformen: Linux + FreeBSD, x86-64 + arm64 (spaeter ggf. mehr)
+#   Target platforms: Linux + FreeBSD, x86-64 + arm64 (maybe more later)
 #
-#   Strict C11 + POSIX.1-2008/XSI. Bewusst KEINE GNU-Extensions und kein
-#   _GNU_SOURCE - der Code muss auf FreeBSD unveraendert compilieren.
-#   Konkret vermieden:
-#     cfcmakeraw()     -> eigener Ersatz (cfmakeraw ist BSD/GNU, nicht POSIX)
-#     flock()          -> fcntl()-Locks (F_SETLK) sind portabel
-#     epoll/timerfd    -> poll() fuer alles
+#   Strict C11 + POSIX.1-2008/XSI. Deliberately NO GNU extensions and no
+#   _GNU_SOURCE - the code must compile unchanged on FreeBSD.
+#   Specifically avoided:
+#     cfcmakeraw()     -> own replacement (cfmakeraw is BSD/GNU, not POSIX)
+#     flock()          -> fcntl() locks (F_SETLK) are portable
+#     epoll/timerfd    -> poll() for everything
 #     getrandom()      -> /dev/urandom
-#     /proc/self/exe   -> nicht portabel, Pfade kommen aus der INI
+#     /proc/self/exe   -> not portable, paths come from the INI
 # ---------------------------------------------------------------------------
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -38,7 +38,6 @@ option(PRTERM_BUILD_TOOLS   "Build shell helper tools"           ON)
 set(PRTERM_RIG_SIM     ON  CACHE BOOL "Build the simulated rig (no hardware)")
 set(PRTERM_RIG_TNC2    ON  CACHE BOOL "Build the TNC2-class driver (Landolt TNC2C, PK-TNC2)")
 set(PRTERM_RIG_TMODEM  OFF CACHE BOOL "Build the T-Modem half-TNC driver")
-set(PRTERM_RIG_MAX25   ON  CACHE BOOL "Build the MAX25-Stack TNC driver")
 
 # ---------------------------------------------------------------------------
 # Compiler settings
@@ -52,9 +51,9 @@ if(PRTERM_WERROR)
     list(APPEND PRTERM_WARN_FLAGS -Werror)
 endif()
 
-# POSIX.1-2008 ist die Untergrenze fuer Linux und FreeBSD. Wird zusaetzlich
-# in jeder .c ueber src/prterm_compat.h gesetzt, damit auch ein von Hand
-# ausgefuehrter Compiler-Lauf funktioniert.
+# POSIX.1-2008 is the lower bound for Linux and FreeBSD. Also set in
+# every .c via src/prterm_compat.h so that a manually run compiler
+# invocation works too.
 add_compile_definitions(_POSIX_C_SOURCE=200809L)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_definitions(_DEFAULT_SOURCE=1)
@@ -127,9 +126,6 @@ endif()
 if(PRTERM_RIG_TMODEM)
     list(APPEND PRTERM_CORE_SOURCES src/tmodem.c)
 endif()
-if(PRTERM_RIG_MAX25)
-    list(APPEND PRTERM_CORE_SOURCES src/max25.c)
-endif()
 
 add_library(prterm_core STATIC ${PRTERM_CORE_SOURCES})
 target_include_directories(prterm_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -138,8 +134,7 @@ target_compile_options(prterm_core PRIVATE ${PRTERM_WARN_FLAGS})
 foreach(_def IN ITEMS
         PRTERM_RIG_SIM=$<BOOL:${PRTERM_RIG_SIM}>
         PRTERM_RIG_TNC2=$<BOOL:${PRTERM_RIG_TNC2}>
-        PRTERM_RIG_TMODEM=$<BOOL:${PRTERM_RIG_TMODEM}>
-        PRTERM_RIG_MAX25=$<BOOL:${PRTERM_RIG_MAX25}>)
+        PRTERM_RIG_TMODEM=$<BOOL:${PRTERM_RIG_TMODEM}>)
     target_compile_definitions(prterm_core PRIVATE ${_def})
 endforeach()
 
@@ -191,14 +186,14 @@ if(BUILD_TESTING)
 endif()
 
 # ---------------------------------------------------------------------------
-# Install: bewusst minimal - "keine Installation" heisst auch, dass ein
-# einfaches Kopieren von prterm.cgi + prterm.ini genuegt.
+# Install: deliberately minimal - "no installation" also means that
+# simply copying prterm.cgi + prterm.ini is enough.
 # ---------------------------------------------------------------------------
 install(TARGETS prterm RUNTIME DESTINATION bin)
 install(FILES prterm.ini README.md DESTINATION share/prterm)
 
 message(STATUS "PRTERM ${PROJECT_VERSION}")
 message(STATUS "  build type   : ${CMAKE_BUILD_TYPE}")
-message(STATUS "  rig drivers  : sim=${PRTERM_RIG_SIM} tmodem=${PRTERM_RIG_TMODEM} max25=${PRTERM_RIG_MAX25}")
+message(STATUS "  rig drivers  : sim=${PRTERM_RIG_SIM} tmodem=${PRTERM_RIG_TMODEM}")
 message(STATUS "  werror       : ${PRTERM_WERROR}")
 message(STATUS "  sanitizers   : ${PRTERM_SANITIZE}")

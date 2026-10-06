@@ -1,8 +1,8 @@
 /*
- * PRTERM - Testgeruest
- * testutil.h - minimale Pruef-Helfer.
+ * PRTERM - test scaffolding
+ * testutil.h - minimal test helpers.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_TESTUTIL_H
 #define PRTERM_TESTUTIL_H
@@ -19,7 +19,7 @@ static int pr_test_checks = 0;
         if (cond) {                                                        \
             printf("  ok   %s (%s:%d)\n", #cond, __FILE__, __LINE__);      \
         } else {                                                           \
-            printf("  FEHLER %s (%s:%d)\n", #cond, __FILE__, __LINE__);    \
+            printf("  FAIL %s (%s:%d)\n", #cond, __FILE__, __LINE__);    \
             pr_test_fails++;                                               \
         }                                                                  \
     } while (0)
@@ -31,7 +31,7 @@ static int pr_test_checks = 0;
         if (_a != NULL && _b != NULL && strcmp(_a, _b) == 0) {             \
             printf("  ok   %s == %s (%s:%d)\n", #a, #b, __FILE__, __LINE__); \
         } else {                                                           \
-            printf("  FEHLER %s != %s\n     ist:  \"%s\"\n     soll: \"%s\"\n", \
+            printf("  FAIL %s != %s\n     got:  \"%s\"\n     want: \"%s\"\n", \
                    #a, #b, _a ? _a : "(null)", _b ? _b : "(null)");        \
             pr_test_fails++;                                               \
         }                                                                  \
@@ -44,7 +44,7 @@ static int pr_test_checks = 0;
         if (_a == _b) {                                                    \
             printf("  ok   %s == %s (%s:%d)\n", #a, #b, __FILE__, __LINE__); \
         } else {                                                           \
-            printf("  FEHLER %s != %s  (%lld != %lld) (%s:%d)\n",          \
+            printf("  FAIL %s != %s  (%lld != %lld) (%s:%d)\n",          \
                    #a, #b, _a, _b, __FILE__, __LINE__);                    \
             pr_test_fails++;                                               \
         }                                                                  \
@@ -52,7 +52,7 @@ static int pr_test_checks = 0;
 
 #define TEST_SUMMARY(name)                                                 \
     do {                                                                   \
-        printf("\n%s: %d Pruefungen, %d Fehler\n",                         \
+        printf("\n%s: %d checks, %d failures\n",                         \
                (name), pr_test_checks, pr_test_fails);                     \
         return pr_test_fails == 0 ? 0 : 1;                                 \
     } while (0)

@@ -1,142 +1,141 @@
-# PRTERM — URL-Oberfläche
+# PRTERM — URL Interface
 
-> **Vorgabe:** *„Die Administration des CGI bekommt keine eigene URL,
-> sondern ist einfach anklickbar im PRTERM über den Browser.“*
+> **Requirement:** *"The administration of the CGI gets no URL of its own,
+> it is simply clickable in PRTERM via the browser."*
 
-PRTERM hat deshalb **genau eine URL**.
+PRTERM therefore has **exactly one URL**.
 
 ---
 
-## 1. Die einzige Adresse
+## 1. The single address
 
 ```
 /prterm.cgi
 ```
 
-Keine Unterpfade. Kein `/admin`. Keine zweite Adresse.
+No sub-paths. No `/admin`. No second address.
 
-Alles, was das CGI tut, hängt an Query-Parametern und Formularfeldern
-derselben URL.
-
----
-
-## 2. Aufrufarten
-
-| Aufruf                                        | Antwort                |
-| --------------------------------------------- | ---------------------- |
-| `GET  /prterm.cgi`                            | HTML5 — die ganze App  |
-| `GET  /prterm.cgi?action=state`               | JSON — Zustand         |
-| `GET  /prterm.cgi?action=log`                 | JSON — Nachrichten     |
-| `GET  /prterm.cgi?action=font`                | Schriftdatei (binär)   |
-| `POST /prterm.cgi`  `action=…`                | Aktion, danach Redirect oder JSON |
-
-`SCRIPT_NAME` ist der Server vorgegeben; PRTERM bildet Links relativ
-(`<form action="">`), damit es unter beliebigem Pfad hängt —
-`/cgi-bin/prterm.cgi`, `/prterm/prterm.cgi`, was auch immer.
+Everything the CGI does hangs off query parameters and form fields
+of the same URL.
 
 ---
 
-## 3. Aktionen (POST)
+## 2. Call types
 
-Alle Aktionen laufen über ein verstecktes Feld `action` im selben Formular
-bzw. als `fetch`-POST auf dieselbe URL.
+| Call                                          | Response                        |
+| --------------------------------------------- | ------------------------------- |
+| `GET  /prterm.cgi`                            | HTML5 — the whole app           |
+| `GET  /prterm.cgi?action=state`               | JSON — state                    |
+| `GET  /prterm.cgi?action=log`                 | JSON — messages                 |
+| `GET  /prterm.cgi?action=font`                | font file (binary)              |
+| `POST /prterm.cgi`  `action=…`                | action, then redirect or JSON   |
 
-### Bedienung
+`SCRIPT_NAME` is preset by the server; PRTERM builds links relatively
+(`<form action="">`), so it hangs under any path —
+`/cgi-bin/prterm.cgi`, `/prterm/prterm.cgi`, whatever.
 
-| `action`  | Felder                                   | Zweck                  |
+---
+
+## 3. Actions (POST)
+
+All actions run through a hidden field `action` in the same form
+or as a `fetch` POST to the same URL.
+
+### Operation
+
+| `action`  | Fields                                   | Purpose                |
 | --------- | ---------------------------------------- | ---------------------- |
-| `tx`      | `text`                                   | senden                 |
-| `ptt`     | `on`                                     | PTT ein/aus            |
-| `set`     | `freq_hz`, `mode`, `duplex`, `channel`   | Betrieb ändern         |
-| `monitor` | `on`                                     | Nur-Empfang            |
+| `tx`      | `text`                                   | transmit               |
+| `ptt`     | `on`                                     | PTT on/off             |
+| `set`     | `freq_hz`, `mode`, `duplex`, `channel`   | change operation       |
+| `monitor` | `on`                                     | receive only           |
 
 ### Administration
 
-| `action`        | Felder                                        | Zweck               |
+| `action`        | Fields                                        | Purpose             |
 | --------------- | --------------------------------------------- | ------------------- |
-| `login`         | `user`, `pass`                                | anmelden            |
-| `logout`        | —                                             | abmelden            |
-| `save_site`     | `site_name`, `subtitle`, `language`           | Allgemein           |
-| `save_station`  | `callerid`, `qth`, `locator`                  | Station             |
-| `save_radio`    | `driver`, `port`, `baud`, `duplex`, …         | Funk                |
-| `save_callsign` | `callid_max_len`, `callerid_*`                | Rufzeichenregeln    |
-| `save_ui`       | `font_file`, `font_size`, `line_height`, …    | Schrift & Raster    |
-| `ban_add`       | `pattern`, `reason`                           | Ban anlegen         |
-| `ban_del`       | `pattern`                                     | Ban entfernen       |
-| `pass_change`   | `old`, `new`, `new2`                          | Passwort            |
-| `config_save`   | `text`                                        | Roh-INI speichern   |
+| `login`         | `user`, `pass`                                | log in              |
+| `logout`        | —                                             | log out             |
+| `save_site`     | `site_name`, `subtitle`, `language`           | general             |
+| `save_station`  | `callerid`, `qth`, `locator`                  | station             |
+| `save_radio`    | `driver`, `port`, `baud`, `duplex`, …         | radio               |
+| `save_callsign` | `callid_max_len`, `callerid_*`                | call sign rules     |
+| `save_ui`       | `font_file`, `font_size`, `line_height`, …    | font & grid         |
+| `ban_add`       | `pattern`, `reason`                           | create ban          |
+| `ban_del`       | `pattern`                                     | remove ban          |
+| `pass_change`   | `old`, `new`, `new2`                          | password            |
+| `config_save`   | `text`                                        | save raw INI        |
 
-Alle Aktionen tragen `csrf` mit (Token aus der Session).
-
----
-
-## 4. Sichtbarkeit im Browser
-
-Die App ist **ein** HTML-Dokument mit mehreren Ansichten, die per Klick
-umschalten:
-
-```
-data-view="terminal"      das Funkterminal (Standard)
-data-view="admin"         Administrationsbereich
-data-view="admin/site"    … mit Unterbereichen
-```
-
-* Ohne Login: das Terminal ist da, die Admin-Fläche ist **versteckt** bzw.
-  zeigt nur die Anmelde-Box.
-* Nach dem Klick auf „Administration“ öffnet sich ein **Dialog** zur
-  Anmeldung — ohne Seitenwechsel.
-* Eingeloggt erscheinen die Admin-Panels direkt im selben Fenster.
-
-Der Wechsel geschieht im Browser. Es gibt **keinen** Zustand in der URL —
-kein `#admin`, kein `?page=`, kein Reload. Wer die Seite neu lädt, steht
-wieder im Terminal.
-
-> **Warum:** die Administration ist ein Werkzeug im laufenden Betrieb, kein
-> getrenntes System. Sie soll genau dort sein, wo gearbeitet wird. Und eine
-> einzelne URL ist die einzige Oberfläche, die sich ohne Installation und
-> ohne Webserver-Konfiguration überall gleich verhält.
+All actions carry `csrf` with them (token from the session).
 
 ---
 
-## 5. Session & Cookie
+## 4. Visibility in the browser
 
-Die Authentifizierung hängt **nicht** an der URL, sondern an einem Cookie:
+The app is **one** HTML document with several views that switch
+on click:
+
+```
+data-view="terminal"      the radio terminal (default)
+data-view="admin"         administration area
+data-view="admin/site"    … with subsections
+```
+
+* Without login: the terminal is there, the admin area is **hidden** or
+  shows only the login box.
+* After the click on "Administration" a **dialog** for logging in opens —
+  without a page change.
+* Once logged in, the admin panels appear directly in the same window.
+
+The switch happens in the browser. There is **no** state in the URL —
+no `#admin`, no `?page=`, no reload. Anyone who reloads the page lands
+back in the terminal.
+
+> **Why:** the administration is a tool in ongoing operation, not a
+> separate system. It should be exactly where the work happens. And a
+> single URL is the only interface that behaves the same everywhere
+> without installation and without web server configuration.
+
+---
+
+## 5. Session & cookie
+
+Authentication hangs **not** on the URL, but on a cookie:
 
 ```
 Set-Cookie: PRTERM_SID=<hex>; Path=/; HttpOnly; SameSite=Strict
 ```
 
-* `HttpOnly` — nicht aus JavaScript lesbar
-* `SameSite=Strict` — kein CSRF über fremde Seiten
-* zusätzliches `csrf`-Token in jedem Formular
-* Ablaufzeit aus `[admin] session_ttl_min`
+* `HttpOnly` — not readable from JavaScript
+* `SameSite=Strict` — no CSRF via foreign pages
+* additional `csrf` token in every form
+* expiry time from `[admin] session_ttl_min`
 
 ---
 
 ## 6. Assets
 
-CSS und JavaScript sind **ins Binary eingebettet** und werden inline im
-`<head>` ausgegeben — damit gibt es keine weiteren URLs, die konfiguriert
-werden müssten.
+CSS and JavaScript are **embedded in the binary** and emitted inline in the
+`<head>` — so there are no further URLs that would need configuring.
 
-Ausnahme: die Schriftdatei. Sie ist eine Nutzer-Datei und wird unter
+Exception: the font file. It is a user file and is served under
 
 ```
 GET /prterm.cgi?action=font
 ```
 
-ausgeliefert. Es gibt **keine** generische Dateiausgabe — die Route liefert
-ausschliesslich die in `[ui] font_file` eingetragene Datei.
+There is **no** generic file output — the route delivers
+exclusively the file entered in `[ui] font_file`.
 
 ---
 
-## 7. Konsequenz für den Webserver
+## 7. Consequence for the web server
 
-Der Server braucht eine einzige Zeile:
+The server needs a single line:
 
 ```
 # Apache
-ScriptAlias /prterm/ /pfad/zu/cgi-bin/
+ScriptAlias /prterm/ /path/to/cgi-bin/
 
 # nginx + fcgiwrap
 location /prterm.cgi { include fastcgi_params; fastcgi_pass unix:/run/fcgiwrap.sock; }
@@ -145,5 +144,5 @@ location /prterm.cgi { include fastcgi_params; fastcgi_pass unix:/run/fcgiwrap.s
 /prterm.cgi
 ```
 
-Keine Weiterleitungen, keine Alias-Tabelle, kein WebSocket, kein Reverse
-Proxy. Genau das ist der Grund, warum PRTERM ein CGI ist.
+No redirects, no alias table, no WebSocket, no reverse
+proxy. That is exactly the reason why PRTERM is a CGI.

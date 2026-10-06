@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * html.c - Layout, eingebettete Assets, Formularbausteine.
+ * html.c - Layout, embedded assets, form building blocks.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -25,7 +25,7 @@ const char *html_js(void)
 }
 
 /* ======================================================================= */
-/* Schriftdatei                                                            */
+/* Font file                                                               */
 /* ======================================================================= */
 
 bool html_font_mime(const char *path, char *mime, size_t mimelen)
@@ -52,7 +52,7 @@ bool html_font_mime(const char *path, char *mime, size_t mimelen)
     return false;
 }
 
-/* format()-Argument fuer @font-face je Endung. */
+/* format() argument for @font-face per extension. */
 static const char *font_format(const char *path)
 {
     if (pr_ends_with(path, ".woff2")) return "woff2";
@@ -62,7 +62,7 @@ static const char *font_format(const char *path)
 }
 
 /* ======================================================================= */
-/* Dokumentkopf                                                            */
+/* Document head                                                           */
 /* ======================================================================= */
 
 void html_open(pr_buf *out, const pr_config *cfg, const pr_session *sess,
@@ -72,7 +72,7 @@ void html_open(pr_buf *out, const pr_config *cfg, const pr_session *sess,
 
     pr_buf_add(out,
         "<!DOCTYPE html>\n"
-        "<html lang=\"de\" data-theme=\"");
+        "<html lang=\"en\" data-theme=\"");
     pr_buf_add(out, pr_str_eq_ci(cfg->ui_theme, "dark") ? "dark" : "silver");
     pr_buf_add(out, "\" data-density=\"");
     pr_buf_add(out, pr_str_eq_ci(cfg->ui_density, "compact") ? "compact" : "normal");
@@ -87,9 +87,9 @@ void html_open(pr_buf *out, const pr_config *cfg, const pr_session *sess,
     pr_html_escape(out, title != NULL && title[0] != '\0' ? title : cfg->site_name);
     pr_buf_add(out, "</title>\n");
 
-    /* Nutzerschrift - nur wenn eine Datei konfiguriert und zulaessig ist.
-     * Relativer Query-Link: loest sich gegen die aktuelle URL auf, damit
-     * PRTERM unter beliebem Pfad haengen kann. */
+    /* User font - only if a file is configured and permitted.
+     * Relative query link: resolves against the current URL so that
+     * PRTERM can be mounted under any path. */
     char mime[32];
     if (html_font_mime(cfg->font_file, mime, sizeof mime)) {
         pr_buf_add(out, "<style>\n@font-face{font-family:\"PRTERM\";");
@@ -98,12 +98,12 @@ void html_open(pr_buf *out, const pr_config *cfg, const pr_session *sess,
         pr_buf_add(out, "\");font-display:swap;}\n</style>\n");
     }
 
-    /* Eingebettetes Stylesheet */
+    /* Embedded stylesheet      */
     pr_buf_add(out, "<style>\n");
     pr_buf_add(out, html_css());
     pr_buf_add(out, "\n</style>\n");
 
-    /* Dynamische Variablen aus [ui] */
+    /* Dynamic variables from [ui]   */
     pr_buf_add(out, "<style>\n:root{");
     if (cfg->font_file[0] != '\0')
         pr_buf_add(out, "--pr-font:\"PRTERM\",");
@@ -123,7 +123,7 @@ void html_close(pr_buf *out, const pr_config *cfg)
 }
 
 /* ======================================================================= */
-/* Formularbausteine                                                       */
+/* Form building blocks                                                    */
 /* ======================================================================= */
 
 static void field_label(pr_buf *out, const char *label, const char *hint)

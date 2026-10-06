@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * cgi.c - Request/Response nach RFC 3875.
+ * cgi.c - Request/response per RFC 3875.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -14,7 +14,7 @@
 #include <string.h>
 
 /* ======================================================================= */
-/* Umgebung                                                                */
+/* Environment                                                             */
 /* ======================================================================= */
 
 bool pr_is_cgi(void)
@@ -29,7 +29,7 @@ const char *pr_cgi_env(const char *name, const char *dflt)
 }
 
 /* ======================================================================= */
-/* Query-Parameter                                                         */
+/* Query parameters                                                        */
 /* ======================================================================= */
 
 static bool query_reserve(pr_query *q, size_t need)
@@ -58,7 +58,7 @@ static void query_free(pr_query *q)
     q->n = q->cap = 0;
 }
 
-/* Zerlegt "a=1&b=2" - verwurstet den String. */
+/* Splits "a=1&b=2" - chops up the string.    */
 static void query_parse(pr_query *q, char *s)
 {
     char *p = s;
@@ -152,7 +152,7 @@ bool pr_req_cookie(const pr_request *req, const char *name,
 }
 
 /* ======================================================================= */
-/* Request lesen                                                           */
+/* Reading requests                                                        */
 /* ======================================================================= */
 
 int pr_request_parse(pr_request *req, char *err, size_t errlen)
@@ -174,7 +174,7 @@ int pr_request_parse(pr_request *req, char *err, size_t errlen)
     if (req->query_string[0] != '\0') {
         char *qs = pr_strdup(req->query_string);
         if (qs == NULL) {
-            snprintf(err, errlen, "Speicher erschoepft");
+            snprintf(err, errlen, "out of memory");
             return -1;
         }
         query_parse(&req->query, qs);
@@ -184,19 +184,19 @@ int pr_request_parse(pr_request *req, char *err, size_t errlen)
     /* POST-Body */
     if (req->content_length > 0) {
         if (req->content_length > 1024u * 1024u) {
-            snprintf(err, errlen, "Anfrage zu gross");
+            snprintf(err, errlen, "request too large");
             return -1;
         }
         req->body = malloc(req->content_length + 1);
         if (req->body == NULL) {
-            snprintf(err, errlen, "Speicher erschoepft");
+            snprintf(err, errlen, "out of memory");
             return -1;
         }
         size_t got = fread(req->body, 1, req->content_length, stdin);
         req->body[got] = '\0';
         req->content_length = got;
 
-        /* Nur urlencoded parsen - multipart wird nicht unterstuetzt. */
+        /* Parse urlencoded only - multipart is not supported.        */
         if (pr_starts_with(req->content_type, "application/x-www-form-urlencoded") ||
             req->content_type[0] == '\0') {
             query_parse(&req->form, req->body);
@@ -312,7 +312,7 @@ void pr_response_emit(const pr_response *r)
     printf("Expires: 0\r\n");
 
     if (r->headers.len > 0) {
-        /* Mehrere Header mit \n getrennt */
+        /* Multiple headers separated by \n */
         const char *p = r->headers.data;
         while (p != NULL && *p != '\0') {
             const char *nl = strchr(p, '\n');

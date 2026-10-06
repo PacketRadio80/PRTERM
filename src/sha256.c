@@ -2,7 +2,7 @@
  * PRTERM - CB & Amateur Radio Terminal
  * sha256.c - FIPS 180-4 SHA-256.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 

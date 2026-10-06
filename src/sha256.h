@@ -2,7 +2,7 @@
  * PRTERM - CB & Amateur Radio Terminal
  * sha256.h - FIPS 180-4 SHA-256, used for password hashing and CSRF tokens.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_SHA256_H
 #define PRTERM_SHA256_H

@@ -1,16 +1,16 @@
 /*
- * PRTERM - Shell-Werkzeug
- * tnc_probe.c - TNC suchen, Profil ermitteln, Rohdaten ansehen.
+ * PRTERM - shell tool
+ * tnc_probe.c - find the TNC, determine the profile, look at raw data.
  *
- *   prterm-probe [GERAET]                 Profil-Sweep (Standard /dev/ttyUSB0)
- *   prterm-probe --all                    alle seriellen Knoten abfragen
- *   prterm-probe --dump GERAET BAUD LINIE eine Verbindung ansehen (Hexdump)
- *   prterm-probe --raw GERAET BAUD LINIE  nur zuhoren, nichts senden
+ *   prterm-probe [DEVICE]                 profile sweep (default /dev/ttyUSB0)
+ *   prterm-probe --all                    query all serial nodes
+ *   prterm-probe --dump DEVICE BAUD LINE  look at a connection (hexdump)
+ *   prterm-probe --raw DEVICE BAUD LINE   only listen, send nothing
  *
- * Es wird NUR seriell gesprochen - kein PTT, keine Funksendung.
- * Der Sweep sendet ausschliesslich lesende Kommandos.
+ * ONLY serial talking happens here - no PTT, no transmission.
+ * The sweep sends exclusively reading commands.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -30,7 +30,7 @@ static int printer(void *ud, const char *msg)
     return 0;
 }
 
-/* "8N1" / "7E1" -> Datenbits, Paritaet, Stopbits */
+/* "8N1" / "7E1" -> data bits, parity, stop bits  */
 static int parse_line(const char *s, int *databits, int *parity, int *stopbits)
 {
     if (s == NULL || strlen(s) != 3)
@@ -61,12 +61,12 @@ static void hexdump(const unsigned char *buf, size_t len)
     }
 }
 
-/* Sendet eine genau angegebene Bytefolge (Hex) und zeigt die Antwort. */
+/* Sends an exactly specified byte sequence (hex) and shows the response. */
 static int do_send(const char *dev, long baud, const char *line, const char *hexstr)
 {
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (parse_line(line, &databits, &parity, &stopbits) != 0) {
-        fprintf(stderr, "Zeilenformat \"%s\" nicht verstanden (z.B. 8N1)\n", line);
+        fprintf(stderr, "line format \"%s\" not understood (e.g. 8N1)\n", line);
         return 2;
     }
 
@@ -78,7 +78,7 @@ static int do_send(const char *dev, long baud, const char *line, const char *hex
         if (*p == '\0') break;
         int hi = -1, lo = -1;
         if (sscanf(p, "%1x%1x", &hi, &lo) != 2 || lo < 0) {
-            fprintf(stderr, "Ungueltige Hexangabe bei \"%s\"\n", p);
+            fprintf(stderr, "invalid hex at \"%s\"\n", p);
             return 2;
         }
         out[olen++] = (unsigned char)((hi << 4) | lo);
@@ -89,23 +89,23 @@ static int do_send(const char *dev, long baud, const char *line, const char *hex
     pr_serial s;
     if (pr_serial_open(&s, dev, baud, databits, parity, stopbits, true,
                        err, sizeof err) != 0) {
-        fprintf(stderr, "Fehler: %s\n", err);
+        fprintf(stderr, "ERROR: %s\n", err);
         return 1;
     }
 
-    printf("Port %s offen: %ld %s\n", dev, baud, line);
-    printf("-> sende %u Byte(s):", (unsigned)olen);
+    printf("Port %s open: %ld %s\n", dev, baud, line);
+    printf("-> sending %u byte(s):", (unsigned)olen);
     for (size_t i = 0; i < olen; i++)
         printf(" %02x", out[i]);
     printf("\n\n");
 
     if (pr_serial_write(&s, out, olen, err, sizeof err) != 0) {
-        fprintf(stderr, "Fehler: %s\n", err);
+        fprintf(stderr, "ERROR: %s\n", err);
         pr_serial_close(&s);
         return 1;
     }
 
-    printf("-> Empfang (4 s):\n\n");
+    printf("-> receiving (4 s):\n\n");
     unsigned char all[4096];
     size_t total = 0;
     for (int i = 0; i < 20; i++) {
@@ -118,11 +118,11 @@ static int do_send(const char *dev, long baud, const char *line, const char *hex
     }
 
     if (total == 0) {
-        printf("    (nichts angekommen)\n");
+        printf("        (nothing received)\n");
     } else {
-        printf("    %u Bytes:\n\n", (unsigned)total);
+        printf("    %u bytes:\n\n", (unsigned)total);
         hexdump(all, total);
-        printf("\n    als Text:\n    |");
+        printf("\n    as text:\n    |");
         for (size_t i = 0; i < total; i++) {
             unsigned char c = all[i];
             if (c == '\r')      printf("\\r");
@@ -139,16 +139,16 @@ static int do_send(const char *dev, long baud, const char *line, const char *hex
 }
 
 /*
- * Modus:
- *   quiet  nur zuhooren, nichts senden
- *   probe  lesende Kommandos senden (Standard)
- *   reset  erst die Ruecksetzfolge, dann lesende Kommandos
+ * Mode:
+ *   quiet  only listen, send nothing
+ *   probe  send reading commands (default)
+ *   reset  reset sequence first, then reading commands
  */
 static int do_dump(const char *dev, long baud, const char *line, const char *mode, int seconds)
 {
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (parse_line(line, &databits, &parity, &stopbits) != 0) {
-        fprintf(stderr, "Zeilenformat \"%s\" nicht verstanden (z.B. 8N1)\n", line);
+        fprintf(stderr, "line format \"%s\" not understood (e.g. 8N1)\n", line);
         return 2;
     }
 
@@ -156,25 +156,25 @@ static int do_dump(const char *dev, long baud, const char *line, const char *mod
     pr_serial s;
     if (pr_serial_open(&s, dev, baud, databits, parity, stopbits, true,
                        err, sizeof err) != 0) {
-        fprintf(stderr, "Fehler: %s\n", err);
+        fprintf(stderr, "ERROR: %s\n", err);
         return 1;
     }
 
-    printf("Port %s offen: %ld %s  (Modus: %s)\n\n", dev, baud, line, mode);
+    printf("Port %s open: %ld %s  (mode: %s)\n\n", dev, baud, line, mode);
 
     if (strcmp(mode, "reset") == 0) {
-        printf("-> Ruecksetzfolge (KISS/Hostmode verlassen)\n");
+        printf("-> reset sequence (leave KISS/host mode)\n");
         pr_probe_reset(&s, NULL, 0);
     }
 
     if (strcmp(mode, "quiet") != 0) {
-        printf("-> lesende Sondierungen\n");
+        printf("-> read-only probes\n");
         static const char *const cmds[] = { "\r", "INFO\r", "HELP\r", "?\r" };
         size_t ncmd = (strcmp(mode, "reset") == 0)
                         ? (sizeof cmds / sizeof cmds[0]) : 1;
         for (size_t i = 0; i < ncmd; i++) {
             char e[64];
-            printf("   sende");
+            printf("   sending");
             for (const char *p = cmds[i]; *p != '\0'; p++)
                 printf(" %02x", (unsigned char)*p);
             printf("\n");
@@ -183,7 +183,7 @@ static int do_dump(const char *dev, long baud, const char *line, const char *mod
         }
     }
 
-    printf("\n-> Empfang (%d s):\n\n", seconds);
+    printf("\n-> receiving (%d s):\n\n", seconds);
     unsigned char all[4096];
     size_t total = 0;
 
@@ -198,12 +198,12 @@ static int do_dump(const char *dev, long baud, const char *line, const char *mod
     }
 
     if (total == 0) {
-        printf("    (nichts angekommen)\n");
+        printf("        (nothing received)\n");
     } else {
-        printf("    %u Bytes empfangen:\n\n", (unsigned)total);
+        printf("    %u bytes received:\n\n", (unsigned)total);
         hexdump(all, total);
 
-        printf("\n    als Text:\n    |");
+        printf("\n        as text:\n    |");
         for (size_t i = 0; i < total; i++) {
             unsigned char c = all[i];
             if (c == '\r')      printf("\\r");
@@ -225,59 +225,59 @@ static int probe_one(const char *dev, pr_probe_result *best,
 {
     printf("\n--- %s ---\n", dev);
     if (pr_probe_device(dev, best, printer, NULL, err, errlen) != 0) {
-        printf("Ergebnis: %s\n", err);
+        printf("Result: %s\n", err);
         return -1;
     }
 
     char pf[32];
     pr_probe_format(best, pf, sizeof pf);
 
-    printf("\n  ERGEBNIS fuer %s\n", dev);
-    printf("    Profil     : %s\n", pf);
-    printf("    Bewertung  : %d\n", best->score);
-    printf("    Banner     : %s\n", best->banner ? "ja" : "nein");
-    printf("    Echo       : %s\n", best->echo_only ? "nur Echo (Echo war an)" : "nein");
-    printf("    Verbindung : %s\n", best->clean_link ? "sauber" : "unsicher");
+    printf("\n  RESULT for %s\n", dev);
+    printf("    Profile : %s\n", pf);
+    printf("    Score   : %d\n", best->score);
+    printf("    Banner  : %s\n", best->banner ? "yes" : "no");
+    printf("    Echo    : %s\n", best->echo_only ? "echo only (echo was on)" : "no");
+    printf("    Link    : %s\n", best->clean_link ? "clean" : "unreliable");
     if (best->answer[0] != '\0')
-        printf("    Antwort    : %.160s\n", best->answer);
+        printf("    Reply   : %.160s\n", best->answer);
 
-    printf("\n  Eintrag fuer prterm.ini:\n");
+    printf("\n  Entry for prterm.ini:\n");
     printf("    port  = %s\n", dev);
     printf("    baud  = %ld\n", best->baud);
     return 0;
 }
 
 /*
- * Boot-Abfang. Der Port wird geoeffnet und bleibt offen - DTR/RTS liegen
- * an, waehrend das Geraet eingeschaltet wird. Genau das ist der Punkt, der
- * den Unterschied zwischen "antwortet" und "schweigt" macht.
+ * Boot interception. The port is opened and stays open - DTR/RTS are
+ * asserted while the device is powered on. That is exactly the point
+ * that makes the difference between "responds" and "stays silent".
  */
 static int do_bootwait(const char *dev, long baud, const char *line, int seconds)
 {
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (parse_line(line, &databits, &parity, &stopbits) != 0) {
-        fprintf(stderr, "Zeilenformat \"%s\" nicht verstanden (z.B. 7E1)\n", line);
+        fprintf(stderr, "line format \"%s\" not understood (e.g. 7E1)\n", line);
         return 2;
     }
 
     char err[256];
     pr_probe_result best;
 
-    printf("\n*** JETZT DAS GERAET EINSCHALTEN ***\n\n");
+    printf("\n*** SWITCH THE DEVICE ON NOW ***\n\n");
     if (pr_probe_bootwait(dev, baud, databits, parity, stopbits, seconds,
                           &best, printer, NULL, err, sizeof err) != 0) {
-        printf("\nErgebnis: %s\n", err);
+        printf("\nResult: %s\n", err);
         if (best.fd >= 0) close(best.fd);
         return 1;
     }
 
-    printf("\n  ERGEBNIS\n");
-    printf("    Banner     : %s\n", best.banner ? "ja" : "nein");
-    printf("    Bewertung  : %d\n", best.score);
-    printf("    Antwort    : %.200s\n", best.answer);
+    printf("\n  RESULT\n");
+    printf("    Banner  : %s\n", best.banner ? "yes" : "no");
+    printf("    Score   : %d\n", best.score);
+    printf("    Reply   : %.200s\n", best.answer);
 
-    printf("\n  Der Port bleibt offen, damit DTR nicht faellt.\n");
-    printf("  Zum Schliessen: ENTER\n");
+    printf("\n  The port stays open so DTR does not fall.\n");
+    printf("  Press ENTER to close\n");
     (void)getchar();
 
     if (best.fd >= 0) close(best.fd);
@@ -289,25 +289,25 @@ int main(int argc, char **argv)
     char err[256];
 
     if (argc < 2 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-        printf("prterm-probe - TNC erkennen und ansehen\n\n");
-        printf("  prterm-probe [GERAET]                  Profil-Sweep\n");
-        printf("  prterm-probe --all                     alle Knoten abfragen\n");
-        printf("  prterm-probe --dump GERAET BAUD LINIE [Modus]\n");
-        printf("  prterm-probe --raw  GERAET BAUD LINIE\n\n");
-        printf("Modus fuer --dump:\n");
-        printf("  probe   lesende Kommandos senden (Standard)\n");
-        printf("  quiet   nur zuhooren\n");
-        printf("  reset   Ruecksetzfolge, dann Kommandos\n\n");
-        printf("Beispiele:\n");
+        printf("prterm-probe - detect and inspect the TNC\n\n");
+        printf("  prterm-probe [DEVICE]                  profile sweep\n");
+        printf("  prterm-probe --all                     query all nodes\n");
+        printf("  prterm-probe --dump DEVICE BAUD LINE [MODE]\n");
+        printf("  prterm-probe --raw  DEVICE BAUD LINE\n\n");
+        printf("Mode for --dump:\n");
+        printf("  probe   send read-only commands (default)\n");
+        printf("  quiet   only listen\n");
+        printf("  reset   reset sequence, then commands\n\n");
+        printf("Examples:\n");
         printf("  prterm-probe /dev/ttyUSB0\n");
         printf("  prterm-probe --dump /dev/ttyUSB0 19200 8N1\n\n");
-        printf("Sendet nur serielle Kommandos, keine Funksendung.\n");
+        printf("Sends only serial commands, no radio transmission.\n");
         return argc < 2 ? 2 : 0;
     }
 
     if (strcmp(argv[1], "--dump") == 0 || strcmp(argv[1], "--raw") == 0) {
         if (argc < 5) {
-            fprintf(stderr, "Aufruf: prterm-probe %s GERAET BAUD LINIE [Modus]\n",
+            fprintf(stderr, "Usage: prterm-probe %s DEVICE BAUD LINE [MODE]\n",
                     argv[1]);
             return 2;
         }
@@ -318,7 +318,7 @@ int main(int argc, char **argv)
 
         if (strcmp(mode, "probe") != 0 && strcmp(mode, "quiet") != 0 &&
             strcmp(mode, "reset") != 0) {
-            fprintf(stderr, "Modus muss probe, quiet oder reset sein\n");
+            fprintf(stderr, "mode must be probe, quiet or reset\n");
             return 2;
         }
         int secs = (argc > 6) ? atoi(argv[6]) : 5;
@@ -327,8 +327,8 @@ int main(int argc, char **argv)
 
     if (strcmp(argv[1], "--bootwait") == 0) {
         if (argc < 5) {
-            fprintf(stderr, "Aufruf: prterm-probe --bootwait GERAET BAUD LINIE [SEK]\n"
-                            "Port oeffnen, DTR anlegen, DANN das Geraet einschalten.\n");
+            fprintf(stderr, "Usage: prterm-probe --bootwait DEVICE BAUD LINE [SEC]\n"
+                            "Open the port, assert DTR, THEN switch the device on.\n");
             return 2;
         }
         int secs = (argc > 5) ? atoi(argv[5]) : 45;
@@ -338,8 +338,8 @@ int main(int argc, char **argv)
     if (strcmp(argv[1], "--send") == 0) {
         if (argc < 6) {
             fprintf(stderr,
-                    "Aufruf: prterm-probe --send GERAET BAUD LINIE HEX\n"
-                    "z.B.   prterm-probe --send /dev/ttyUSB0 19200 8N1 \"c0 ff c0\"\n");
+                    "Usage: prterm-probe --send DEVICE BAUD LINE HEX\n"
+                    "e.g.   prterm-probe --send /dev/ttyUSB0 19200 8N1 \"c0 ff c0\"\n");
             return 2;
         }
         return do_send(argv[2], atol(argv[3]), argv[4], argv[5]);
@@ -359,7 +359,7 @@ int main(int argc, char **argv)
             if (probe_one(devs[i], &best, err, sizeof err) == 0)
                 found++;
         }
-        printf("\n%d Geraet(e) mit Antwort\n", found);
+        printf("\n%d device(s) with reply\n", found);
         return found > 0 ? 0 : 1;
     }
 

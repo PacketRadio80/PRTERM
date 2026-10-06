@@ -1,7 +1,7 @@
 /*
- * PRTERM - Test: Konfigurationsmodell
+ * PRTERM - Test: configuration model
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -77,18 +77,18 @@ int main(void)
     CHECK(c.duplex == PR_DUPLEX_FULL);
     CHECK_INT(c.mode, PR_BAND_AM);
 
-    /* Schrift: Groesse + Zeilenabstand in Prozent */
+    /* Font: size + line spacing in percent        */
     CHECK_STR(c.font_file, "./fonts/test.ttf");
     CHECK_INT(c.font_size, 16);
     CHECK_INT(c.line_height_pct, 130);
 
     printf("\n== Kanal zu Frequenz ==\n");
-    CHECK_INT(pr_config_channel(&c), 14);      /* 27.125 MHz = Kanal 14 */
+    CHECK_INT(pr_config_channel(&c), 14);      /* 27.125 MHz = channel 14 */
     CHECK(pr_config_set_channel(&c, 40));
     CHECK_INT(c.freq_hz, 27405000L);
     CHECK(pr_config_set_channel(&c, 41));
     CHECK_INT(c.freq_hz, 26565000L);
-    /* Kanal 41 erlaubt nur FM - Betriebsart muss mitgezogen werden */
+    /* Channel 41 allows only FM - mode must be adjusted along      */
     CHECK_INT(c.mode, PR_BAND_FM);
     CHECK(!pr_config_set_channel(&c, 0));
     CHECK(!pr_config_set_channel(&c, 99));
@@ -108,7 +108,7 @@ int main(void)
     CHECK(pr_config_del_ban(&c, "OK1*"));
     CHECK_INT(c.nbans, 2);
     CHECK(!pr_config_is_banned(&c, "OK1KQ"));
-    CHECK(!pr_config_del_ban(&c, "OK1*"));     /* nochmal: nicht vorhanden */
+    CHECK(!pr_config_del_ban(&c, "OK1*"));     /* again: not present       */
 
     printf("\n== Ablehnung schlechter Werte ==\n");
     {

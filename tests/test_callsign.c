@@ -1,11 +1,11 @@
 /*
  * PRTERM - Test: CALLID / CALLERID
  *
- * Die Vorgabe ist bewusst strenger als AX.25:
- *   CALLID   max. 6 Zeichen, kein Suffix
- *   CALLERID max. 6 Zeichen + "-<Ziffer>" = 8 Zeichen gesamt
+ * The spec is deliberately stricter than AX.25:
+ *   CALLID   max. 6 chars, no suffix
+ *   CALLERID max. 6 chars + "-<digit>" = 8 chars total
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -32,20 +32,20 @@ int main(void)
     CHECK(callid_valid("A1", &r));
     CHECK(callid_valid("PRTERM", &r));
     CHECK(!callid_valid("", &r));
-    CHECK(!callid_valid("DL1ABCD", &r));      /* 7 Zeichen */
-    CHECK(!callid_valid("DL1AB-1", &r));      /* kein Suffix */
-    CHECK(!callid_valid("DL 1AB", &r));       /* Leerzeichen */
+    CHECK(!callid_valid("DL1ABCD", &r));      /* 7 chars   */
+    CHECK(!callid_valid("DL1AB-1", &r));      /* no suffix   */
+    CHECK(!callid_valid("DL 1AB", &r));       /* blanks      */
     CHECK(!callid_valid("DL1A-", &r));
 
     printf("\n== CALLERID: 6 + 2 ==\n");
-    CHECK(callerid_valid("DL1ABC", &r));      /* ohne SSID */
+    CHECK(callerid_valid("DL1ABC", &r));      /* without SSID */
     CHECK(callerid_valid("DL1ABC-1", &r));    /* 6 + 2 = 8 */
     CHECK(callerid_valid("PRTERM-7", &r));
     CHECK(callerid_valid("A-0", &r));
-    CHECK(!callerid_valid("DL1ABC-12", &r));  /* 9 Zeichen: zu lang */
-    CHECK(!callerid_valid("DL1ABCD-1", &r));  /* Basis zu lang */
-    CHECK(!callerid_valid("DL1ABC-", &r));    /* SSID ohne Ziffer */
-    CHECK(!callerid_valid("DL1ABC-A", &r));   /* SSID keine Ziffer */
+    CHECK(!callerid_valid("DL1ABC-12", &r));  /* 9 chars: too long  */
+    CHECK(!callerid_valid("DL1ABCD-1", &r));  /* base too long */
+    CHECK(!callerid_valid("DL1ABC-", &r));    /* SSID without digit */
+    CHECK(!callerid_valid("DL1ABC-A", &r));   /* SSID not a digit  */
     CHECK(!callerid_valid("", &r));
 
     printf("\n== SSID-Begrenzung konfigurierbar ==\n");
@@ -99,7 +99,7 @@ int main(void)
     CHECK(!call_pattern_match("KB1ABC-?", "KB1ABC-33"));
     CHECK(call_pattern_match("*SPAM*", "XSPAMX"));
     CHECK(call_pattern_match("*", ""));
-    CHECK(call_pattern_match("dl9*", "DL9ABC"));   /* case-insensitiv */
+    CHECK(call_pattern_match("dl9*", "DL9ABC"));   /* case-insensitive */
     CHECK(!call_pattern_match("", "X"));
 
     {
@@ -115,7 +115,7 @@ int main(void)
         CHECK(call_to_ax25("DL1ABC", a));
         CHECK(call_to_ax25("DL1ABC-1", b));
 
-        /* Basis muss identisch sein (blank-gefuellt, shifted) */
+        /* base must be identical (space padded, shifted)      */
         CHECK(memcmp(a, b, 6) == 0);
         CHECK(a[0] == (unsigned char)('D' << 1));
 

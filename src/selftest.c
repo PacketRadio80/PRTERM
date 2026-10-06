@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * selftest.c - Zustandspruefung der TNCs und Notfall-Ruecksetzung.
+ * selftest.c - TNC health check and emergency reset.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -20,19 +20,19 @@ const char *pr_test_status_name(int status)
 {
     switch (status) {
     case PR_TEST_PASS: return "ok";
-    case PR_TEST_WARN: return "Hinweis";
-    case PR_TEST_FAIL: return "FEHLER";
-    case PR_TEST_SKIP: return "uebersprungen";
+    case PR_TEST_WARN: return "warn";
+    case PR_TEST_FAIL: return "error";
+    case PR_TEST_SKIP: return "skipped";
     default:           return "?";
     }
 }
 
 /*
- * Den lesbaren Teil eines Puffers anzeigen.
+ * Show the readable part of a buffer.
  *
- * Die Ruecksetzfolge hinterlaesst NULs und BEL vor dem eigentlichen
- * Banner. Diese zu zeigen macht die Ausgabe irrefuehrend - es sah aus
- * wie Muell, obwohl die Firmware sauber erkannt wurde.
+ * The reset sequence leaves NULs and BEL in front of the actual
+ * banner. Showing them makes the output misleading - it looked like
+ * garbage although the firmware was cleanly detected.
  */
 static void show_readable(char *dst, size_t dstlen,
                           const unsigned char *src, size_t len)
@@ -79,32 +79,32 @@ static void add(pr_selftest *st, const char *name, int status, const char *fmt, 
         st->overall_ok = false;
 }
 
-/* Zeilenformat aus der Konfiguration lesen */
+/* Read the line format from the configuration */
 static bool parse_line_cfg(const pr_config *cfg, int *db, int *par, int *sb)
 {
     return pr_serial_parse_line(cfg->serial_line, db, par, sb);
 }
 
 /*
- * Kernprüfung: antwortet das Geraet, und welche Firmware steckt darin.
- * Liefert die Firmware-Kennung zurueck, damit Aufrufer sie anzeigen koennen.
+ * Core check: does the device respond, and which firmware is inside.
+ * Returns the firmware ID so callers can display it.
  */
 static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
 {
     *responds = false;
 
     if (!pr_file_exists(cfg->port)) {
-        add(st, "Schnittstelle", PR_TEST_FAIL,
-            "%s existiert nicht - Kabel, Konverter oder Geraet fehlt?",
+        add(st, "Interface", PR_TEST_FAIL,
+            "%s does not exist - cable, converter or device missing?",
             cfg->port);
         return -1;
     }
-    add(st, "Schnittstelle", PR_TEST_PASS, "%s", cfg->port);
+    add(st, "Interface", PR_TEST_PASS, "%s", cfg->port);
 
     int db = 8, par = PR_PAR_NONE, sb = 1;
     if (!parse_line_cfg(cfg, &db, &par, &sb)) {
-        add(st, "Zeilenformat", PR_TEST_FAIL,
-            "\"%s\" ist nicht lesbar (erwartet 8n1, 7e1, 8e1, 8o1)",
+        add(st, "Line format", PR_TEST_FAIL,
+            "\"%s\" is not readable (expected 8n1, 7e1, 8e1, 8o1)",
             cfg->serial_line);
         return -1;
     }
@@ -113,31 +113,31 @@ static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
     pr_serial s;
     if (pr_serial_open(&s, cfg->port, cfg->baud, db, par, sb, true,
                        err, sizeof err) != 0) {
-        add(st, "Port oeffnen", PR_TEST_FAIL, "%s", err);
+        add(st, "Open port", PR_TEST_FAIL, "%s", err);
         return -1;
     }
-    add(st, "Port oeffnen", PR_TEST_PASS, "%ld %s", cfg->baud, cfg->serial_line);
+    add(st, "Open port", PR_TEST_PASS, "%ld %s", cfg->baud, cfg->serial_line);
 
-    /* DTR/RTS muessen anliegen - ohne sie antwortet ein TNC2C nicht */
+    /* DTR/RTS must be asserted - without them a TNC2C does not respond */
     if (pr_serial_hold_dtr(&s, err, sizeof err) != 0) {
-        add(st, "Modemleitungen", PR_TEST_WARN,
-            "DTR/RTS nicht setzbar: %s", err);
+        add(st, "Modem lines", PR_TEST_WARN,
+            "DTR/RTS not settable: %s", err);
     } else {
-        add(st, "Modemleitungen", PR_TEST_PASS, "DTR und RTS liegen an");
+        add(st, "Modem lines", PR_TEST_PASS, "DTR and RTS asserted");
     }
 
     /*
-     * Antwort abfragen. ESC V (1B 56 0D) ist der Probe; die Ruecksetzfolge
-     * laesst bei TheFirmware zusaetzlich den Banner erscheinen.
+     * Query the response. ESC V (1B 56 0D) is the probe; the reset
+     * sequence additionally makes the banner appear on TheFirmware.
      */
     unsigned char answer[1024];
-    /* Ohne Ruecksetzfolge - ein Gesundheits-Check veraendert nichts. */
+    /* Without reset sequence - a health check changes nothing.       */
     size_t alen = 0;
 
     /*
-     * Bewusst NUR ESC V. Ein vorgeschicktes "\r" hat bei TheFirmware
-     * dazu gefuehrt, dass die Antwort nicht mehr ankam - der direkte
-     * Aufruf mit ESC V allein funktionierte dagegen zuverlaessig.
+     * Deliberately ONLY ESC V. A leading "\r" made TheFirmware stop
+     * responding - the direct call with ESC V alone worked reliably
+     * in contrast.
      */
     static const char *const probes[] = { "\x1b" "V\r" };
     for (size_t i = 0; i < sizeof probes / sizeof probes[0]; i++) {
@@ -152,17 +152,17 @@ static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
         }
     }
 
-    /* Echo entfernen, dann auswerten */
+    /* Remove echo, then evaluate     */
     alen = pr_probe_strip_echo(answer, alen);
 
     if (alen == 0) {
-        add(st, "Gerät antwortet", PR_TEST_FAIL,
-            "keine Antwort auf ESC V - siehe Hinweis zum Port");
+        add(st, "Device answers", PR_TEST_FAIL,
+            "no reply to ESC V - see the note on the port");
         pr_serial_close(&s);
         return -1;
     }
     *responds = true;
-    add(st, "Gerät antwortet", PR_TEST_PASS, "%u Byte(s) Antwort", (unsigned)alen);
+    add(st, "Device answers", PR_TEST_PASS, "%u byte(s) reply", (unsigned)alen);
 
     if (pr_probe_has_banner(answer, alen)) {
         char show[128];
@@ -171,7 +171,7 @@ static int talk_to_device(const pr_config *cfg, pr_selftest *st, bool *responds)
         add(st, "Firmware", PR_TEST_PASS, "%.110s", show);
     } else {
         add(st, "Firmware", PR_TEST_WARN,
-            "kein Banner erkannt - Geraet spricht, ist aber unbekannt");
+            "no banner detected - device talks but is unknown");
     }
 
     pr_serial_close(&s);
@@ -183,50 +183,50 @@ int pr_selftest_run(const pr_config *cfg, pr_selftest *out)
     memset(out, 0, sizeof *out);
     out->overall_ok = true;
 
-    add(out, "Treiber", PR_TEST_PASS, "%s", cfg->rig_driver);
+    add(out, "Driver", PR_TEST_PASS, "%s", cfg->rig_driver);
     add(out, "CALLERID", callerid_valid(cfg->callerid, &cfg->callsign)
                              ? PR_TEST_PASS : PR_TEST_FAIL,
         "%s", cfg->callerid);
 
-    /* Frequenz und Betriebsart gegen die Zuteilung pruefen */
+    /* Check frequency and mode against the allocation      */
     {
         char err[256];
         const pr_channel *ch = cfg->bandplan
             ? pr_bandplan_at_freq(cfg->bandplan, cfg->freq_hz) : NULL;
         if (ch == NULL) {
-            add(out, "Kanal", PR_TEST_FAIL,
-                "%.3f MHz liegt auf keinem zugeteilten Kanal",
+            add(out, "Channel", PR_TEST_FAIL,
+                "%.3f MHz is not on an allocated channel",
                 cfg->freq_hz / 1000000.0);
         } else {
             int st2 = pr_bandplan_tx_freq_ok(cfg->bandplan, cfg->freq_hz,
                                              cfg->mode, err, sizeof err)
                         ? PR_TEST_PASS : PR_TEST_FAIL;
-            add(out, "Kanal", st2, "Kanal %d auf %.3f MHz",
+            add(out, "Channel", st2, "channel %d on %.3f MHz",
                 ch->num, ch->freq_hz / 1000000.0);
         }
     }
 
-    /* Simulation braucht keine serielle Verbindung */
+    /* The simulation needs no serial connection    */
     if (pr_str_eq_ci(cfg->rig_driver, "sim")) {
-        add(out, "Schnittstelle", PR_TEST_SKIP, "Simulation - kein Geraet noetig");
+        add(out, "Interface", PR_TEST_SKIP, "simulation - no device needed");
         return out->overall_ok ? 0 : 1;
     }
 
-    add(out, "Funk-Baudrate", PR_TEST_PASS,
-        "%ld Baud auf dem Kanal (Modem: %s)",
-        cfg->radio_baud, cfg->modem[0] != '\0' ? cfg->modem : "unbekannt");
+    add(out, "Radio baud", PR_TEST_PASS,
+        "%ld baud on the channel (modem: %s)",
+        cfg->radio_baud, cfg->modem[0] != '\0' ? cfg->modem : "unknown");
 
     bool responds = false;
     (void)talk_to_device(cfg, out, &responds);
 
     if (responds) {
-        add(out, "Gesamt", PR_TEST_PASS, "Geraet ist betriebsbereit");
+        add(out, "Overall", PR_TEST_PASS, "device is operational");
     } else {
-        add(out, "Gesamt", PR_TEST_FAIL,
-            "Geraet antwortet nicht - mit --reset-tnc versuchen");
+        add(out, "Overall", PR_TEST_FAIL,
+            "device does not answer - try --reset-tnc");
     }
 
-    /* Fehler zaehlen */
+    /* Count errors   */
     int fails = 0;
     for (size_t i = 0; i < out->n; i++)
         if (out->items[i].status == PR_TEST_FAIL)
@@ -240,7 +240,7 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
     out->overall_ok = true;
 
     if (!pr_file_exists(cfg->port)) {
-        add(out, "Schnittstelle", PR_TEST_FAIL, "%s existiert nicht", cfg->port);
+        add(out, "Interface", PR_TEST_FAIL, "%s does not exist", cfg->port);
         return 1;
     }
 
@@ -251,16 +251,16 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
     pr_serial s;
     if (pr_serial_open(&s, cfg->port, cfg->baud, db, par, sb, true,
                        err, sizeof err) != 0) {
-        add(out, "Port oeffnen", PR_TEST_FAIL, "%s", err);
+        add(out, "Open port", PR_TEST_FAIL, "%s", err);
         return 1;
     }
 
-    add(out, "Ruecksetzfolge", PR_TEST_PASS,
-        "Puffer leeren, Hostmode verlassen, Firmware-Ruecksetz");
+    add(out, "Reset sequence", PR_TEST_PASS,
+        "flush buffer, leave host mode, firmware reset");
     unsigned char answer[1024];
     size_t alen = pr_probe_reset(&s, answer, sizeof answer);
 
-    /* Nach dem Reset muss das Geraet wieder ansprechbar sein */
+    /* After the reset the device must respond again          */
     static const char *const probes[] = { "\r", "\x1b" "V\r" };
     for (size_t i = 0; i < sizeof probes / sizeof probes[0]; i++) {
         (void)pr_serial_write(&s, probes[i], strlen(probes[i]), err, sizeof err);
@@ -276,16 +276,16 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
     alen = pr_probe_strip_echo(answer, alen);
 
     if (alen == 0) {
-        add(out, "Nach dem Reset", PR_TEST_FAIL,
-            "immer noch keine Antwort - Netzteil trennen und neu einschalten");
+        add(out, "After reset", PR_TEST_FAIL,
+            "still no reply - disconnect power and switch on again");
     } else if (pr_probe_has_banner(answer, alen)) {
         char show[128];
         show_readable(show, sizeof show, answer, alen);
         pr_strlcpy(out->firmware, show, sizeof out->firmware);
-        add(out, "Nach dem Reset", PR_TEST_PASS, "%.110s", show);
+        add(out, "After reset", PR_TEST_PASS, "%.110s", show);
     } else {
-        add(out, "Nach dem Reset", PR_TEST_WARN,
-            "Geraet spricht, aber ohne Banner");
+        add(out, "After reset", PR_TEST_WARN,
+            "device talks, but without banner");
     }
 
     pr_serial_close(&s);
@@ -300,14 +300,14 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
 
 
 /*
- * Wiederherstellung: Geraet in den KISS-Modus zurueckfuehren und
- * haengende Daten im Speicher loeschen.
+ * Recovery: bring the device back into KISS mode and delete pending
+ * data in memory.
  *
- * WICHTIG zur Reihenfolge: solange ein TNC im KISS-Modus steht, wird
- * JEDES geschriebene Byte gesendet. Wer also "mal kurz nachschaut",
- * sendet dabei selbst. Darum wird zuerst KISS verlassen - das ist ein
- * Kontrollrahmen und geht NICHT auf die Luft. Erst danach darf man
- * Kommandos schicken.
+ * IMPORTANT about the order: as long as a TNC is in KISS mode, EVERY
+ * written byte is transmitted. So anyone who "just takes a quick look"
+ * transmits while doing so. That is why KISS is left first - it is a
+ * control frame and does NOT go on the air. Only then one may send
+ * commands.
  */
 int pr_checkup(const pr_config *cfg, pr_selftest *out)
 {
@@ -316,8 +316,8 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
 
     int db, par, sb;
     if (!parse_line_cfg(cfg, &db, &par, &sb)) {
-        add(out, "Zeilenformat", PR_TEST_FAIL,
-            "Line \"%s\" ist ungueltig", cfg->serial_line);
+        add(out, "Line format", PR_TEST_FAIL,
+            "line \"%s\" is invalid", cfg->serial_line);
         out->overall_ok = false;
         return 1;
     }
@@ -325,32 +325,32 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
     pr_serial ser;
     if (pr_serial_open(&ser, cfg->port, cfg->baud, db, par, sb, true,
                        err, sizeof err) != 0) {
-        add(out, "Port oeffnen", PR_TEST_FAIL, "%.180s", err);
+        add(out, "Open port", PR_TEST_FAIL, "%.180s", err);
         out->overall_ok = false;
         return 1;
     }
-    add(out, "Port oeffnen", PR_TEST_PASS, "%ld %s", cfg->baud, cfg->serial_line);
+    add(out, "Open port", PR_TEST_PASS, "%ld %s", cfg->baud, cfg->serial_line);
 
-    /* 1. KISS verlassen - Kontrollrahmen, sendet nichts */
+    /* 1. Leave KISS - control frame, sends nothing      */
     {
         static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
         (void)pr_serial_write(&ser, leave, sizeof leave, err, sizeof err);
         /*
-         * Das Geraet braucht danach Zeit. Die zu kurze Wartezeit war der
-         * Grund, warum die folgende Probe keine Antwort bekam.
+         * The device needs time afterwards. The too short wait was the
+         * reason why the following probe got no response.
          */
         usleep(1500000);
     }
 
-    /* 2. + 3. Bewaehrte Ruecksetzfolge. Jetzt ist man im Kommandomodus,
-     * das Schreiben sendet nichts. Die Folge leert den Puffer und
-     * bestaetigt sich ueber den Banner. */
+    /* 2. + 3. Proven reset sequence. Now we are in command mode,
+     * writing sends nothing. The sequence empties the buffer and
+     * confirms itself via the banner. */
     unsigned char answer[1024];
     size_t alen = pr_probe_reset(&ser, answer, sizeof answer);
 
     if (alen == 0) {
-        add(out, "Kommandomodus", PR_TEST_FAIL,
-            "Geraet antwortet nicht - Port, Baudrate oder Geraet pruefen");
+        add(out, "Command mode", PR_TEST_FAIL,
+            "device does not answer - check port, baud rate or device");
         pr_serial_close(&ser);
         out->overall_ok = false;
         return 1;
@@ -359,12 +359,12 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
         char show[128];
         show_readable(show, sizeof show, answer, alen);
         pr_strlcpy(out->firmware, show, sizeof out->firmware);
-        add(out, "Speicher", PR_TEST_PASS,
-            "Puffer geleert - keine unbestaetigten Daten mehr");
-        add(out, "Kommandomodus", PR_TEST_PASS, "%.110s", show);
+        add(out, "Memory", PR_TEST_PASS,
+            "buffer flushed - no unconfirmed data left");
+        add(out, "Command mode", PR_TEST_PASS, "%.110s", show);
     }
 
-    /* 4. KISS betreten - je nach Profil */
+    /* 4. Enter KISS - per profile       */
     {
         char e2[128];
         if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
@@ -372,24 +372,24 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
                 'k','i','s','s',' ','o','n','\r'
             };
             (void)pr_serial_write(&ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
-            add(out, "KISS-Einfahrt", PR_TEST_PASS, "kiss on (TAPR)");
+            add(out, "KISS entry", PR_TEST_PASS, "kiss on (TAPR)");
         } else {
             static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
             (void)pr_serial_write(&ser, kiss_on, sizeof kiss_on, e2, sizeof e2);
-            add(out, "KISS-Einfahrt", PR_TEST_PASS, "ESC @K");
+            add(out, "KISS entry", PR_TEST_PASS, "ESC @K");
         }
         usleep(250000);
 
-        /* Reste aus dem Umschalten verwerfen */
+        /* Discard leftovers from the switching */
         unsigned char junk[256];
         (void)pr_serial_read_quiet(&ser, junk, sizeof junk, 250, 100,
                                    e2, sizeof e2);
     }
 
-    add(out, "Speicher", PR_TEST_PASS,
-        "Puffer geleert - keine unbestaetigten Daten mehr");
-    add(out, "Gesamt", PR_TEST_PASS,
-        "Geraet steht im KISS-Modus und ist betriebsbereit");
+    add(out, "Memory", PR_TEST_PASS,
+        "buffer flushed - no unconfirmed data left");
+    add(out, "Overall", PR_TEST_PASS,
+        "device is in KISS mode and operational");
 
     pr_serial_close(&ser);
     out->overall_ok = true;
@@ -402,9 +402,9 @@ void pr_selftest_print(const pr_selftest *st, FILE *f)
         const pr_test_result *r = &st->items[i];
         const char *mark = (r->status == PR_TEST_PASS) ? " ok  " :
                            (r->status == PR_TEST_WARN) ? " !   " :
-                           (r->status == PR_TEST_SKIP) ? " -   " : " FEHL";
+                           (r->status == PR_TEST_SKIP) ? " -   " : " FAIL";
         fprintf(f, "  [%s] %-22s %s\n", mark, r->name, r->detail);
     }
-    fprintf(f, "\n  %s\n", st->overall_ok ? "Alles in Ordnung."
-                                          : "Es gibt Befunde - siehe oben.");
+    fprintf(f, "\n  %s\n", st->overall_ok ? "All in order."
+                                          : "There are findings - see above.");
 }

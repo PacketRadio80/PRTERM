@@ -1,12 +1,12 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * admin.c - Admin-Aktionen.
+ * admin.c - Admin actions.
  *
- * Jede Aktion schreibt nur ihre EIGENEN Schluessel zurueck. Dadurch bleiben
- * Kommentare und Reihenfolge der prterm.ini im uebrigen Text erhalten -
- * die Datei ist dokumentiert und wird auch von Hand gepflegt.
+ * Each action writes back only its OWN keys. This keeps comments and
+ * order in the rest of prterm.ini intact - the file is documented and
+ * is also maintained by hand.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -24,7 +24,7 @@
 #include <string.h>
 
 /* ======================================================================= */
-/* Helfer                                                                  */
+/* Helpers                                                                 */
 /* ======================================================================= */
 
 static void json_ok(pr_response *res)
@@ -37,15 +37,15 @@ static void json_err(pr_response *res, const char *msg)
 {
     pr_response_json(res, 400);
     pr_buf_add(&res->body, "{\"ok\":false,\"error\":\"");
-    pr_json_escape(&res->body, msg != NULL ? msg : "Fehler");
+    pr_json_escape(&res->body, msg != NULL ? msg : "error");
     pr_buf_add(&res->body, "\"}");
 }
 
-/* Speichert die INI und haelt das Modell konsistent. */
+/* Saves the INI and keeps the model consistent.      */
 static bool persist(pr_config *cfg, pr_response *res)
 {
     if (cfg->raw == NULL) {
-        json_err(res, "keine Konfiguration geladen");
+        json_err(res, "no configuration loaded");
         return false;
     }
     char err[256];
@@ -53,7 +53,7 @@ static bool persist(pr_config *cfg, pr_response *res)
         json_err(res, err);
         return false;
     }
-    /* Neu einlesen, damit Validierung und Defaults greifen */
+    /* Re-read so validation and defaults take effect       */
     pr_config fresh;
     if (pr_config_load(&fresh, cfg->ini_path, err, sizeof err) != 0) {
         json_err(res, err);
@@ -72,7 +72,7 @@ static const char *arg(pr_request *req, const char *k)
 }
 
 /* ======================================================================= */
-/* Aktionen                                                                */
+/* Actions                                                                 */
 /* ======================================================================= */
 
 static void act_save_site(pr_request *req, pr_response *res, pr_config *cfg)
@@ -87,8 +87,8 @@ static void act_save_station(pr_request *req, pr_response *res, pr_config *cfg)
 {
     char call[PR_CALLSIGN_MAX];
     if (!callerid_normalize(call, sizeof call, arg(req, "callerid"), &cfg->callsign)) {
-        json_err(res, "CALLERID ist ung\u00fcltig (Basis max. 6 Zeichen, "
-                      "SSID \"-<Ziffer>\", gesamt max. 8)");
+        json_err(res, "CALLERID is invalid (base max. 6 characters, "
+                      "SSID \"-<digit>\", total max. 8)");
         return;
     }
     ini_set(cfg->raw, "station", "callerid", call);
@@ -103,13 +103,13 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
 
     const char *driver = arg(req, "driver");
     if (pr_rig_find(driver) == NULL) {
-        json_err(res, "unbekannter Rig-Treiber");
+        json_err(res, "unknown rig driver");
         return;
     }
 
     const char *duplex = arg(req, "duplex");
     if (strcmp(duplex, "full") != 0 && strcmp(duplex, "half") != 0) {
-        json_err(res, "duplex muss \"full\" oder \"half\" sein");
+        json_err(res, "duplex must be \"full\" or \"half\"");
         return;
     }
 
@@ -117,12 +117,12 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
     long pwr  = pr_parse_long(arg(req, "tx_power_mw"), 0, NULL);
     long baud = pr_parse_long(arg(req, "baud"), 0, NULL);
 
-    /* Compliance VOR dem Speichern */
+    /* Compliance BEFORE saving     */
     if (freq > 0) {
         const pr_channel *ch = pr_bandplan_at_freq(cfg->bandplan, freq);
         if (ch == NULL) {
             snprintf(err, sizeof err,
-                     "%.3f MHz liegt nicht auf einem zugeteilten Kanal",
+                     "%.3f MHz is not on an allocated channel",
                      freq / 1000000.0);
             json_err(res, err);
             return;
@@ -155,11 +155,11 @@ static void act_save_callsign(pr_request *req, pr_response *res, pr_config *cfg)
     long d = pr_parse_long(arg(req, "callerid_ssid_digits"), 1, NULL);
 
     if (a < 1 || a > 10 || b < 1 || b > 10 || c < 1 || c > 16 || d < 0 || d > 2) {
-        json_err(res, "Rufzeichenregeln ausserhalb der zulaessigen Grenzen");
+        json_err(res, "callsign rules outside the allowed limits");
         return;
     }
     if (c < b) {
-        json_err(res, "Gesamtl\u00e4nge darf nicht kleiner als die Basis sein");
+        json_err(res, "total length must not be smaller than the base");
         return;
     }
 
@@ -171,9 +171,9 @@ static void act_save_callsign(pr_request *req, pr_response *res, pr_config *cfg)
                  pr_parse_bool(arg(req, "callerid_allow_ssid"), true));
 
     if (persist(cfg, res)) {
-        /* Pruefen, ob die eigene CALLERID unter den neuen Regeln noch gilt */
+        /* Check whether our own CALLERID is still valid under the new rules */
         if (!callerid_valid(cfg->callerid, &cfg->callsign)) {
-            json_err(res, "Die neue Regel macht die eigene CALLERID ung\u00fcltig");
+            json_err(res, "the new rule makes your own CALLERID invalid");
             return;
         }
         json_ok(res);
@@ -187,7 +187,7 @@ static void act_save_ui(pr_request *req, pr_response *res, pr_config *cfg)
     if (font[0] != '\0') {
         char mime[32];
         if (!html_font_mime(font, mime, sizeof mime)) {
-            json_err(res, "Schriftdatei muss .ttf, .otf, .woff oder .woff2 sein");
+            json_err(res, "font file must be .ttf, .otf, .woff or .woff2");
             return;
         }
     }
@@ -195,22 +195,22 @@ static void act_save_ui(pr_request *req, pr_response *res, pr_config *cfg)
     long size = pr_parse_long(arg(req, "font_size"), 14, NULL);
     long lh   = pr_parse_long(arg(req, "line_height"), 120, NULL);
     if (size < 6 || size > 96) {
-        json_err(res, "Schriftgr\u00f6sse muss zwischen 6 und 96 liegen");
+        json_err(res, "font size must be between 6 and 96");
         return;
     }
     if (lh < 100 || lh > 300) {
-        json_err(res, "Zeilenabstand muss zwischen 100% und 300% liegen");
+        json_err(res, "line height must be between 100% and 300%");
         return;
     }
 
     const char *density = arg(req, "density");
     if (strcmp(density, "compact") != 0 && strcmp(density, "normal") != 0) {
-        json_err(res, "density muss \"compact\" oder \"normal\" sein");
+        json_err(res, "density must be \"compact\" or \"normal\"");
         return;
     }
     const char *theme = arg(req, "theme");
     if (strcmp(theme, "silver") != 0 && strcmp(theme, "dark") != 0) {
-        json_err(res, "theme muss \"silver\" oder \"dark\" sein");
+        json_err(res, "theme must be \"silver\" or \"dark\"");
         return;
     }
 
@@ -231,11 +231,11 @@ static void act_ban_add(pr_request *req, pr_response *res, pr_config *cfg)
     pr_upper(pattern);
 
     if (pattern[0] == '\0') {
-        json_err(res, "Muster darf nicht leer sein");
+        json_err(res, "pattern must not be empty");
         return;
     }
     if (strlen(pattern) >= sizeof pattern) {
-        json_err(res, "Muster zu lang");
+        json_err(res, "pattern too long");
         return;
     }
 
@@ -251,7 +251,7 @@ static void act_ban_del(pr_request *req, pr_response *res, pr_config *cfg)
     pr_upper(pattern);
 
     if (!ini_del(cfg->raw, "ban", pattern)) {
-        json_err(res, "kein solcher Ban-Eintrag");
+        json_err(res, "no such ban entry");
         return;
     }
     if (persist(cfg, res)) json_ok(res);
@@ -264,24 +264,27 @@ static void act_pass_change(pr_request *req, pr_response *res, pr_config *cfg,
     const char *newp = arg(req, "new");
     const char *new2 = arg(req, "new2");
 
-    if (cfg->admin_pass_hash[0] != '\0') {
-        if (!pr_verify_password(oldp, cfg->admin_pass_hash)) {
-            json_err(res, "altes Passwort stimmt nicht");
-            return;
-        }
+    /*
+     * The old password is always checked - against the operator hash when one
+     * is set, against the built-in default otherwise. Changing a password must
+     * never be possible without knowing the current one.
+     */
+    if (!pr_auth_check_password(cfg, oldp)) {
+        json_err(res, "old password is wrong");
+        return;
     }
     if (strlen(newp) < 8) {
-        json_err(res, "neues Passwort muss mindestens 8 Zeichen haben");
+        json_err(res, "new password must have at least 8 characters");
         return;
     }
     if (strcmp(newp, new2) != 0) {
-        json_err(res, "Passwortwiederholung stimmt nicht \u00fcberein");
+        json_err(res, "password repetition does not match");
         return;
     }
 
     char hash[160];
     if (pr_hash_password(newp, hash, sizeof hash) != 0) {
-        json_err(res, "Hash konnte nicht erzeugt werden");
+        json_err(res, "hash could not be created");
         return;
     }
     ini_set(cfg->raw, "admin", "pass_hash", hash);
@@ -305,7 +308,7 @@ static void act_config_save(pr_request *req, pr_response *res, pr_config *cfg)
         return;
     }
 
-    /* Erst validieren, dann ersetzen - sonst steht eine kaputte Datei. */
+    /* Validate first, then replace - otherwise a broken file remains.  */
     pr_config test;
     if (pr_config_apply(&test, fresh, err, sizeof err) != 0) {
         json_err(res, err);
@@ -342,7 +345,7 @@ int pr_admin_action(pr_request *req, pr_response *res,
 {
     const char *action = pr_req_param(req, "action");
     if (action == NULL) {
-        json_err(res, "keine Aktion");
+        json_err(res, "no action");
         return 0;
     }
 
@@ -355,7 +358,7 @@ int pr_admin_action(pr_request *req, pr_response *res,
     else if (strcmp(action, "ban_del")      == 0) act_ban_del(req, res, cfg);
     else if (strcmp(action, "pass_change")  == 0) act_pass_change(req, res, cfg, sess);
     else if (strcmp(action, "config_save")  == 0) act_config_save(req, res, cfg);
-    else json_err(res, "unbekannte Aktion");
+    else json_err(res, "unknown action");
 
     return 0;
 }

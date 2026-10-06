@@ -1,11 +1,11 @@
 /*
- * PRTERM - Test: Bandplan und Compliance-Gate
+ * PRTERM - Test: band plan and compliance gate
  *
- * Die Werte stammen aus der BNetzA-Allgemeinzuteilung fuer den CB-Funk,
- * Vfg. Nr. 21/2021. Diese Tests sind absichtlich streng: bei Vorgaben
- * darf nichts "fast stimmen".
+ * The values come from the BNetzA general allocation for CB radio,
+ * Vfg. Nr. 21/2021. These tests are deliberately strict: for rules
+ * nothing may be "almost right".
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -18,13 +18,13 @@ int main(void)
 {
     const pr_bandplan *bp = pr_bandplan_default();
 
-    printf("Bandplan: %s\nQuelle : %s\n\n", bp->name, bp->source);
+    printf("Band plan: %s\nSource   : %s\n\n", bp->name, bp->source);
 
     printf("== Aufbau ==\n");
     CHECK_INT(bp->nch, 80);
     CHECK_INT(bp->bw_hz, 10000L);
 
-    /* Kanalnummern 1..80, vollstaendig und eindeutig */
+    /* Channel numbers 1..80, complete and unique     */
     {
         int seen[81];
         memset(seen, 0, sizeof seen);
@@ -39,7 +39,7 @@ int main(void)
         CHECK(ok);
     }
 
-    /* Frequenzen eindeutig */
+    /* Frequencies unique   */
     {
         int dup = 0;
         for (size_t i = 0; i < bp->nch; i++)
@@ -76,13 +76,13 @@ int main(void)
             if ((c->modes & (PR_BAND_FM | PR_BAND_AM | PR_BAND_SSB))
                     != (PR_BAND_FM | PR_BAND_AM | PR_BAND_SSB)) ok = 0;
         }
-        CHECK(ok);          /* K1..40: FM + AM + SSB */
+        CHECK(ok);          /* Ch1..40: FM + AM + SSB */
     }
     {
         int ok = 1;
         for (int n = 41; n <= 80; n++)
             if (pr_bandplan_channel(bp, n)->modes != PR_BAND_FM) ok = 0;
-        CHECK(ok);          /* K41..80: nur FM */
+        CHECK(ok);          /* Ch41..80: FM only */
     }
 
     printf("\n== Leistungsgrenzen ==\n");

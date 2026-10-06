@@ -1,16 +1,16 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * simrig.c - Simuliertes Rig. Kein Hardware-Zugriff.
+ * simrig.c - Simulated rig. No hardware access.
  *
- * Zweck: den gesamten Betrieb - einschliesslich Vollduplex - ohne Geraet
- * durchspielen zu koennen. Der Zustand lebt in state.ini, damit er ueber
- * die einzelnen CGI-Aufrufe hinweg erhalten bleibt.
+ * Purpose: play through the whole operation - including full duplex -
+ * without a device. The state lives in state.ini so it survives the
+ * individual CGI calls.
  *
- * Vollduplex im Modell:
- *   full -> der Empfang laeuft waehrend ptt=1 ungehindert weiter
- *   half -> waehrend ptt=1 wird nicht empfangen (rx_muted=1)
+ * Full duplex in the model:
+ *   full -> reception continues unhindered while ptt=1
+ *   half -> nothing is received while ptt=1 (rx_muted=1)
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -33,7 +33,7 @@ typedef struct sim_impl {
 } sim_impl;
 
 /* ======================================================================= */
-/* Simulierte Gegenstationen                                               */
+/* Simulated counterparties                                                */
 /* ======================================================================= */
 
 static const char *const sim_stations[] = {
@@ -43,18 +43,18 @@ static const char *const sim_stations[] = {
 };
 
 static const char *const sim_texts[] = {
-    "CQ CQ CQ hier @, hoert mich jemand?",
-    "@, Du kommst gut an, 5 und 9.",
-    "QRM auf dem Kanal, bitte warten.",
-    "Roger @, alles verstanden.",
-    "Kurze Pause, bin gleich wieder da.",
-    "Antennenprobleme, Signal ist schwach.",
-    "Gutes Signal heute, Bedingungen stimmen.",
-    "@, wie ist Deine QTH?",
-    "Alles klar, bis spaeter 73.",
-    "Bleibt ruhig auf der Frequenz.",
-    "Sonde: 4 Watt ERP reicht hier vollkommen.",
-    "Kanal ist frei, kann wer senden.",
+    "CQ CQ CQ here @, anyone copy me?",
+    "@, you are coming in well, 5 and 9.",
+    "QRM on the channel, please wait.",
+    "Roger @, all understood.",
+    "Short break, be right back.",
+    "Antenna problems, signal is weak.",
+    "Good signal today, conditions are right.",
+    "@, what is your QTH?",
+    "All clear, see you later 73.",
+    "Keep it quiet on the frequency.",
+    "Test call: 4 watts ERP is plenty here.",
+    "Channel is clear, anyone may transmit.",
 };
 
 #define SIM_STATIONS (sizeof sim_stations / sizeof sim_stations[0])
@@ -62,7 +62,7 @@ static const char *const sim_texts[] = {
 
 static unsigned sim_rand(sim_impl *s)
 {
-    /* kleiner xorshift - deterministisch, ohne libc-Abhaengigkeit */
+    /* small xorshift - deterministic, without libc dependency     */
     unsigned x = s->rng;
     x ^= x << 13;
     x ^= x >> 17;
@@ -72,13 +72,13 @@ static unsigned sim_rand(sim_impl *s)
 }
 
 /* ======================================================================= */
-/* Hilfen                                                                  */
+/* Helpers                                                                  */
 /* ======================================================================= */
 
 /*
- * Platzhalter im Text ist '@' - ausdruecklich KEIN printf-Format. Damit kann
- * kein Format-String-Injection entstehen, falls die Vorlagen jemals aus
- * fremden Quellen kommen.
+ * The placeholder in the text is '@' - explicitly NOT a printf format.
+ * This way no format string injection can happen, should the templates
+ * ever come from foreign sources.
  */
 static void sim_format(char *dst, size_t dstlen, const char *tmpl, const char *who)
 {
@@ -97,7 +97,7 @@ static void sim_format(char *dst, size_t dstlen, const char *tmpl, const char *w
 static void sim_push_rx(sim_impl *s, const char *from, const char *text, int db)
 {
     if (s->npending >= SIM_MAX_PENDING) {
-        /* aelteste verwerfen */
+        /* discard oldest     */
         memmove(&s->pending[0], &s->pending[1],
                 (SIM_MAX_PENDING - 1) * sizeof s->pending[0]);
         s->npending = SIM_MAX_PENDING - 1;
@@ -138,7 +138,7 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
 {
     sim_impl *s = calloc(1, sizeof *s);
     if (s == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
 
@@ -147,8 +147,8 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
         return -1;
     }
 
-    /* Nur beim allerersten Start melden - der Prozess wird bei jedem
-     * CGI-Aufruf neu aufgemacht, das waere sonst Dauer-Rauschen im Log. */
+    /* Report only on the very first start - the process is recreated on
+     * every CGI call, otherwise it would be permanent noise in the log. */
     char state_file[640];
     pr_state_path(r->cfg, state_file, sizeof state_file);
     bool first_time = !pr_file_exists(state_file);
@@ -167,8 +167,8 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
     if (first_time) {
         sim_note(r, PR_MSG_SYS, "SYS",
                  s->st.duplex == PR_DUPLEX_FULL
-                     ? "Simulation gestartet (Vollduplex: Empfang laeuft waehrend des Sendens weiter)"
-                     : "Simulation gestartet (Halbduplex: waehrend des Sendens wird nicht empfangen)");
+                     ? "simulation started (full duplex: reception continues while transmitting)"
+                     : "simulation started (half duplex: no reception while transmitting)");
     }
     return 0;
 }
@@ -184,14 +184,14 @@ static void sim_close(pr_rig *r)
 }
 
 /*
- * Fuehrt die Simulation fort. Im Vollduplex entsteht waehrend des Sendens
- * weiterhin Empfang - das ist genau der Fall, den PRTERM zeigen soll.
+ * Advances the simulation. In full duplex reception continues during
+ * transmission - that is exactly the case PRTERM is meant to show.
  */
 static int sim_refresh(pr_rig *r, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -199,10 +199,10 @@ static int sim_refresh(pr_rig *r, char *err, size_t errlen)
     long long now = pr_now_s();
     long long idle = now - s->last_gen;
 
-    /* Halbduplex: waehrend ptt=1 wird nicht empfangen */
+    /* Half duplex: nothing is received while ptt=1    */
     s->st.rx_muted = (s->st.duplex == PR_DUPLEX_HALF) && s->st.ptt;
 
-    /* Signalpegel leicht bewegen */
+    /* Move the signal level slightly */
     s->st.rx_db += (int)(sim_rand(s) % 5) - 2;
     if (s->st.rx_db < -110) s->st.rx_db = -110;
     if (s->st.rx_db > -25)  s->st.rx_db = -25;
@@ -211,7 +211,7 @@ static int sim_refresh(pr_rig *r, char *err, size_t errlen)
     if (s->st.monitor)
         s->st.rx_muted = false;
 
-    /* Neue Nachrichten alle 2-5 Sekunden */
+    /* New messages every 2-5 seconds     */
     long long interval = 2 + (long long)(sim_rand(s) % 4);
     if (idle < interval)
         return 0;
@@ -219,7 +219,7 @@ static int sim_refresh(pr_rig *r, char *err, size_t errlen)
     s->last_gen = now;
 
     if (s->st.rx_muted) {
-        /* Halbduplex: keine RX-Nachrichten waehrend des Sendens */
+        /* Half duplex: no RX messages during transmission       */
         return 0;
     }
 
@@ -257,7 +257,7 @@ static int sim_set_freq(pr_rig *r, long freq_hz, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -270,7 +270,7 @@ static int sim_set_mode(pr_rig *r, unsigned mode, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -283,13 +283,13 @@ static int sim_set_ptt(pr_rig *r, bool on, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
 
     if (on && s->st.monitor) {
-        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        snprintf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
 
@@ -310,7 +310,7 @@ static int sim_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -324,7 +324,7 @@ static int sim_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
     (void)errlen;
@@ -341,15 +341,15 @@ static int sim_send(pr_rig *r, const char *from, const char *to,
                  const char *text,
                     char *err, size_t errlen)
 {
-    (void)to;   /* Ziel ist bei diesem Treiber ohne Bedeutung */
+    (void)to;   /* The destination is irrelevant for this driver */
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht offen");
+        snprintf(err, errlen, "simulation not open");
         return -1;
     }
 
     if (s->st.monitor) {
-        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        snprintf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     if (text == NULL || text[0] == '\0') {
@@ -357,14 +357,14 @@ static int sim_send(pr_rig *r, const char *from, const char *to,
         return -1;
     }
 
-    /* Im Vollduplex laeuft der Empfang waehrenddessen weiter. */
+    /* In full duplex reception continues meanwhile.           */
     sim_note(r, PR_MSG_TX, from, text);
 
     s->st.tx_count++;
     s->st.last_tx_ts = pr_now_s();
     sim_save(r, s);
 
-    /* Vollduplex: sofort wieder neuer Empfang */
+    /* Full duplex: new reception immediately  */
     if (s->st.duplex == PR_DUPLEX_FULL && !s->st.rx_muted) {
         char echo[PR_MSG_TEXT];
         snprintf(echo, sizeof echo, "Roger %s, kopiert.", from);
@@ -374,19 +374,19 @@ static int sim_send(pr_rig *r, const char *from, const char *to,
 }
 
 /*
- * Pruef-Trager: bei der Simulation wird der Zustand gefuehrt und die
- * Zeit abgewartet, damit der Ablauf im Test identisch zum Echtgeraet ist.
+ * Test carrier: in the simulation the state is tracked and the time
+ * waited out, so the test sequence is identical to the real device.
  */
 static int sim_carrier_test(pr_rig *r, unsigned seconds,
                             char *err, size_t errlen)
 {
     sim_impl *s = r->impl;
     if (s == NULL) {
-        snprintf(err, errlen, "Simulation nicht verbunden");
+        snprintf(err, errlen, "simulation not connected");
         return -1;
     }
     if (seconds == 0 || seconds > 10) {
-        snprintf(err, errlen, "Dauer muss zwischen 1 und 10 Sekunden liegen");
+        snprintf(err, errlen, "duration must be between 1 and 10 seconds");
         return -1;
     }
     (void)errlen;
@@ -422,7 +422,7 @@ static int sim_drain(pr_rig *r, pr_msg *out, size_t cap, size_t *n)
 
 const pr_rig_vtbl pr_rig_sim = {
     "sim",
-    "Simulation (ohne Hardware)",
+    "Simulation (no hardware)",
     sim_open,
     sim_close,
     sim_refresh,

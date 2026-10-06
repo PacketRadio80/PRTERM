@@ -1,11 +1,11 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * radio.h - Rig-Abstraktion.
+ * radio.h - Rig abstraction.
  *
- * Alle Geraete hinter einer VTable. Das Terminal kennt nur diese Schnitt-
- * stelle; TNC2-Klone, T-Modem, MAX25 und die Simulation sind austauschbar.
+ * All devices sit behind one VTable. The terminal knows only this
+ * interface; TNC2 clones, T-Modem and the simulation are swappable.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_RADIO_H
 #define PRTERM_RADIO_H
@@ -19,7 +19,7 @@
 
 #define PR_MSG_TEXT 240
 
-/* Nachrichtenart */
+/* Message type   */
 #define PR_MSG_RX   'R'
 #define PR_MSG_TX   'T'
 #define PR_MSG_SYS  'S'
@@ -28,9 +28,9 @@
 
 typedef struct pr_msg {
     char      kind;
-    char      from[PR_CALLSIGN_MAX];   /* Absender */
-    char      to[PR_CALLSIGN_MAX];     /* Ziel - leer = Rundspruch */
-    char      station[32];             /* welches Geraet hat es gefangen */
+    char      from[PR_CALLSIGN_MAX];   /* Sender   */
+    char      to[PR_CALLSIGN_MAX];     /* Destination - empty = broadcast */
+    char      station[32];             /* which device picked it up      */
     char      text[PR_MSG_TEXT];
     int       db;
     long long ts;
@@ -40,8 +40,8 @@ typedef struct pr_rig_state {
     long      freq_hz;
     unsigned  mode;
     bool      ptt;
-    bool      monitor;       /* Nur-Empfang */
-    bool      rx_muted;      /* half: RX waehrend TX geschaltet */
+    bool      monitor;       /* RX only     */
+    bool      rx_muted;      /* half: RX switched during TX     */
     bool      squelch_open;
     int       rx_db;
     int       tx_db;
@@ -64,14 +64,14 @@ typedef struct pr_rig_state {
 typedef struct pr_rig pr_rig;
 
 typedef struct pr_rig_vtbl {
-    const char *name;         /* INI-Wert fuer [radio] driver */
+    const char *name;         /* INI value for [radio] driver */
     const char *description;
 
     int  (*open)(pr_rig *r, char *err, size_t errlen);
     void (*close)(pr_rig *r);
 
-    /* Geraet abfragen / Simulation fortschreiben.
-     * Liefert neue RX-Nachrichten ueber drain(). */
+    /* Poll the device / advance the simulation.
+     * Returns new RX messages via drain(). */
     int  (*refresh)(pr_rig *r, char *err, size_t errlen);
     int  (*get_state)(pr_rig *r, pr_rig_state *out);
 
@@ -81,22 +81,22 @@ typedef struct pr_rig_vtbl {
     int  (*set_duplex)(pr_rig *r, pr_duplex d, char *err, size_t errlen);
     int  (*set_monitor)(pr_rig *r, bool on, char *err, size_t errlen);
 
-    /* Senden. Die Compliance-Pruefung liegt VORHER im Aufrufer.
-     * "to" ist die anzurufende Station, leer oder "CQ" = Rundruf. */
+    /* Transmit. The compliance check happens BEFORE, in the caller.
+     * "to" is the station to call, empty or "CQ" = broadcast. */
     int  (*send)(pr_rig *r, const char *from, const char *to,
                  const char *text, char *err, size_t errlen);
 
-    /* Pruef-Trager: haelt die Sendung fuer eine gegebene Zeit offen.
+    /* Test carrier: keeps the transmitter open for a given time.
      *
-     * Das ist ein GERAETETEST fuer den Adminbereich - kein Betrieb.
-     * Wichtig fuer KISS: dort schaltet die Hardware beim Rahmen selbst,
-     * es gibt keinen Befehl fuer "nur Traeger". Ein KISS-Treiber muss
-     * die Zeit daher ueber die Rahmenlaenge abbilden.
+     * This is a DEVICE TEST for the admin area - not operation.
+     * For KISS the hardware switches with the frame itself - there
+     * is no "carrier only" command. A KISS driver must map the
+     * time via the frame length.
      *
-     * Die Compliance-Pruefung liegt wie beim Senden VORHER im Aufrufer. */
+     * The compliance check happens BEFORE, in the caller. */
     int  (*carrier_test)(pr_rig *r, unsigned seconds, char *err, size_t errlen);
 
-    /* Neue RX-Nachrichten abholen (seit dem letzten Aufruf). */
+    /* Fetch new RX messages (since the last call).           */
     int  (*drain)(pr_rig *r, pr_msg *out, size_t cap, size_t *n);
 } pr_rig_vtbl;
 
@@ -111,17 +111,16 @@ size_t             pr_rig_count(void);
 const pr_rig_vtbl *pr_rig_at(size_t idx);
 const pr_rig_vtbl *pr_rig_find(const char *name);
 
-/* ---- Komfort-Dispatch ------------------------------------------------- */
+/* ---- Convenience dispatch ----------------------------------------------------- */
 int  pr_rig_open(pr_rig *r, const pr_config *cfg, char *err, size_t errlen);
 void pr_rig_close(pr_rig *r);
 
-/* ---- Treiber ---------------------------------------------------------- */
-/* Die Deklarationen sind bewusst unbedingt: sie sind nur Prototypen, die
- * tatsaechliche Verdrahtung passiert in radio.c abhaengig von den
- * PRTERM_RIG_*-Schaltern. So findet -Wmissing-prototypes immer ein Prototyp. */
+/* ---- Drivers ---------------------------------------------------------- */
+/* The declarations are deliberately unconditional: they are just
+ * prototypes, the actual wiring happens in radio.c depending on the
+ * PRTERM_RIG_* switches. So -Wmissing-prototypes always finds one. */
 extern const pr_rig_vtbl pr_rig_sim;
 extern const pr_rig_vtbl pr_rig_tnc2;
 extern const pr_rig_vtbl pr_rig_tmodem;
-extern const pr_rig_vtbl pr_rig_max25;
 
 #endif /* PRTERM_RADIO_H */

@@ -1,18 +1,18 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * main.c - Einstiegspunkt.
+ * main.c - Entry point.
  *
- * Zwei Betriebsformen:
+ * Two operating modes:
  *
- *   1. CGI  (GATEWAY_INTERFACE gesetzt)
- *      -> eine Anfrage bearbeiten, HTML oder JSON ausgeben.
+ *   1. CGI  (GATEWAY_INTERFACE set)
+ *      -> handle one request, output HTML or JSON.
  *
- *   2. Kommandozeile (kein Webserver)
- *      -> Konfiguration pruefen, Passwort-Hash erzeugen, Bandplan zeigen.
- *         Das ist wichtig fuer "keine Installation": alles laeuft auch
- *         ohne Browser und ohne Webserver.
+ *   2. Command line (no webserver)
+ *      -> check configuration, create password hash, show band plan.
+ *         This matters for "no installation": everything also runs
+ *         without a browser and without a webserver.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -34,15 +34,15 @@
 #define PRTERM_VERSION "0.1.0"
 
 /* ======================================================================= */
-/* Konfigurationsdatei finden                                               */
+/* Find the configuration file                                               */
 /* ======================================================================= */
 
 /*
- * Reihenfolge:
- *   1. Kommandozeilenargument
- *   2. Umgebungsvariable PRTERM_INI
+ * Order:
+ *   1. Command line argument
+ *   2. Environment variable PRTERM_INI
  *   3. ./prterm.ini
- *   4. prterm.ini neben der ausfuehrbaren Datei (aus argv[0] abgeleitet)
+ *   4. prterm.ini next to the executable (derived from argv[0])
  */
 static void find_ini(int argc, char **argv, char *dst, size_t dstlen)
 {
@@ -53,14 +53,14 @@ static void find_ini(int argc, char **argv, char *dst, size_t dstlen)
     }
 
     /*
-     * Neben dem CGI. Das ist im Webbetrieb die verlaessliche Adresse:
-     * der Webserver hat ein anderes Arbeitsverzeichnis als der Aufrufer,
-     * und eine dort liegende prterm.ini wuerde sonst den Vorrang haben.
+     * Next to the CGI. In web operation this is the reliable location:
+     * the webserver has a different working directory than the caller,
+     * and a prterm.ini lying there would otherwise take precedence.
      */
     {
         /*
-         * SCRIPT_FILENAME setzen nicht alle Webserver. PATH_TRANSLATED
-         * ist bei CGI zuverlaessiger gesetzt - beide werden versucht.
+         * Not every webserver sets SCRIPT_FILENAME. PATH_TRANSLATED is
+         * set more reliably for CGI - both are tried.
          */
         const char *sf = getenv("SCRIPT_FILENAME");
         if (sf == NULL || sf[0] == '\0')
@@ -99,36 +99,36 @@ static void find_ini(int argc, char **argv, char *dst, size_t dstlen)
 }
 
 /* ======================================================================= */
-/* Kommandozeile                                                           */
+/* Command line                                                            */
 /* ======================================================================= */
 
 static void usage(FILE *f)
 {
     fprintf(f,
-"PRTERM %s - CB & Amateurfunk Terminal (CGI)\n"
+"PRTERM %s - CB & Amateur Radio Terminal (CGI)\n"
 "\n"
-"Aufruf:\n"
-"  prterm.cgi                      als CGI vom Webserver ausfuehren\n"
-"  prterm.cgi [OPTION]             als Werkzeug auf der Kommandozeile\n"
+"Usage:\n"
+"  prterm.cgi                      run as CGI from the webserver\n"
+"  prterm.cgi [OPTION]             run as a command line tool\n"
 "\n"
-"Optionen:\n"
-"  -h, --help                diese Hilfe\n"
-"  -V, --version             Version\n"
-"  --check-ini [DATEI]       Konfiguration pruefen\n"
-"  --checkup [DATEI] [STATION]    KISS-Modus sicherstellen, Speicher leeren\n"
-"  --selftest [DATEI] [STATION]   Geraete-Zustand pruefen\n"
-"  --reset-tnc [DATEI] [STATION]  Notfall-Ruecksetzung des TNC ausloesen\n"
-"  --print-config [DATEI]    wirksame Konfiguration anzeigen\n"
-"  --gen-ini [DATEI]         Beispiel-konfiguration erzeugen\n"
-"  --hash-password PASS      Passwort-Hash fuer [admin] pass_hash\n"
-"  --add-ban MUSTER [GRUND]  Rufzeichen sperren\n"
-"  --del-ban MUSTER          Sperre aufheben\n"
-"  --channels [BANDPLAN]     Kanaltabelle anzeigen\n"
+"Options:\n"
+"  -h, --help                this help\n"
+"  -V, --version             version\n"
+"  --check-ini [FILE]        check configuration\n"
+"  --checkup [FILE] [STATION]    ensure KISS mode, clear memory\n"
+"  --selftest [FILE] [STATION]   check device state\n"
+"  --reset-tnc [FILE] [STATION]  trigger emergency TNC reset\n"
+"  --print-config [FILE]     show effective configuration\n"
+"  --gen-ini [FILE]          generate sample configuration\n"
+"  --hash-password PASS      password hash for [admin] pass_hash\n"
+"  --add-ban PATTERN [REASON]    block callsign\n"
+"  --del-ban PATTERN         remove block\n"
+"  --channels [BANDPLAN]     show channel table\n"
 "\n"
-"Umgebung:\n"
-"  PRTERM_INI                Pfad zur prterm.ini\n"
+"Environment:\n"
+"  PRTERM_INI                path to prterm.ini\n"
 "\n"
-"Installation: prterm.cgi + prterm.ini in einen CGI-Ordner kopieren.\n",
+"Installation: copy prterm.cgi + prterm.ini into a CGI directory.\n",
         PRTERM_VERSION);
 }
 
@@ -138,43 +138,43 @@ static int cmd_check_ini(const char *path)
     pr_config cfg;
 
     if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
-        fprintf(stderr, "FEHLER: %s\n", err);
+        fprintf(stderr, "ERROR: %s\n", err);
         pr_config_free(&cfg);
         return 1;
     }
 
-    printf("prterm.ini ist gueltig: %s\n", path);
+    printf("prterm.ini is valid: %s\n", path);
     printf("  Name          : %s\n", cfg.site_name);
     printf("  CALLERID      : %s\n", cfg.callerid);
-    printf("  Treiber       : %s\n", cfg.rig_driver);
-    printf("  Schnittstelle : %s @ %ld\n", cfg.port, cfg.baud);
+    printf("  Driver        : %s\n", cfg.rig_driver);
+    printf("  Interface     : %s @ %ld\n", cfg.port, cfg.baud);
     printf("  Duplex        : %s\n", pr_duplex_name(cfg.duplex));
-    printf("  Frequenz      : %ld Hz (Kanal %d)\n",
+    printf("  Frequency     : %ld Hz (channel %d)\n",
            cfg.freq_hz, pr_config_channel(&cfg));
-    printf("  Betriebsart   : %s\n", pr_band_mode_name(cfg.mode));
-    printf("  Bandplan      : %s\n", cfg.bandplan->name);
+    printf("  Mode          : %s\n", pr_band_mode_name(cfg.mode));
+    printf("  Band plan     : %s\n", cfg.bandplan->name);
     printf("  Bans          : %zu\n", cfg.nbans);
-    printf("  Schrift       : %s (%d px)\n",
+    printf("  Font          : %s (%d px)\n",
            cfg.font_file[0] != '\0' ? cfg.font_file : "System",
            cfg.font_size);
-    printf("  Admin         : %s\n", cfg.admin_enabled ? "aktiv" : "gesperrt");
-    printf("  Passwort      : %s\n",
-           cfg.admin_pass_hash[0] != '\0' ? "gesetzt"
-                                          : "KEINES - Login ist gesperrt");
+    printf("  Admin         : %s\n", cfg.admin_enabled ? "enabled" : "disabled");
+    printf("  Password      : %s\n",
+           cfg.admin_pass_hash[0] != '\0' ? "set"
+                                         : "NONE - login disabled");
 
     if (cfg.nstations > 0) {
-        printf("\n  Stationen (%zu):\n", cfg.nstations);
+        printf("\n  Stations (%zu):\n", cfg.nstations);
         for (size_t k = 0; k < cfg.nstations; k++) {
             const pr_station *st = &cfg.stations[k];
-            printf("    %-10s %s\n", st->name, st->enabled ? "" : "(gesperrt)");
-            printf("               Geraet      : %s\n", st->port);
-            printf("               seriell     : %ld %s\n", st->baud, st->serial_line);
-            printf("               Funk        : %ld Baud%s%s\n", st->radio_baud,
+            printf("    %-10s %s\n", st->name, st->enabled ? "" : "(disabled)");
+            printf("               Device      : %s\n", st->port);
+            printf("               Serial      : %ld %s\n", st->baud, st->serial_line);
+            printf("               Radio       : %ld baud%s%s\n", st->radio_baud,
                    st->modem[0] != '\0' ? " / " : "",
                    st->modem[0] != '\0' ? st->modem : "");
             printf("               CALLERID    : %s\n", st->callerid);
             if (st->antenna[0] != '\0')
-                printf("               Antenne     : %s\n", st->antenna);
+                printf("               Antenna     : %s\n", st->antenna);
         }
     }
 
@@ -186,12 +186,12 @@ static int cmd_hash_password(const char *pass)
 {
     char hash[160];
     if (pr_hash_password(pass, hash, sizeof hash) != 0) {
-        fprintf(stderr, "FEHLER: Hash konnte nicht erzeugt werden\n");
+        fprintf(stderr, "ERROR: could not create hash\n");
         return 1;
     }
     printf("%s\n", hash);
     fprintf(stderr,
-            "In prterm.ini unter [admin] pass_hash eintragen.\n");
+            "Add it to prterm.ini under [admin] pass_hash.\n");
     return 0;
 }
 
@@ -200,13 +200,13 @@ static void cmd_channels(const char *id)
     const pr_bandplan *bp = (id != NULL) ? pr_bandplan_by_id(id)
                                          : pr_bandplan_default();
     if (bp == NULL) {
-        fprintf(stderr, "FEHLER: unbekannter Bandplan \"%s\"\n", id);
+        fprintf(stderr, "ERROR: unknown band plan \"%s\"\n", id);
         return;
     }
 
-    printf("%s\nQuelle: %s\n", bp->name, bp->source);
-    printf("Kanalbandbreite: %ld Hz\n\n", bp->bw_hz);
-    printf("  Kanal   Frequenz      Modi      Merkmale\n");
+    printf("%s\nSource: %s\n", bp->name, bp->source);
+    printf("Channel spacing: %ld Hz\n\n", bp->bw_hz);
+    printf("  Channel  Frequency  Modes       Features\n");
     printf("  -----  -----------  --------  ----------------\n");
 
     for (size_t i = 0; i < bp->nch; i++) {
@@ -217,16 +217,16 @@ static void cmd_channels(const char *id)
         char flags[24];
         flags[0] = '\0';
         if (c->flags & PR_CH_F_GATEWAY) pr_strlcat(flags, "Gateway ", sizeof flags);
-        if (c->flags & PR_CH_F_DATA)    pr_strlcat(flags, "Daten ",   sizeof flags);
+        if (c->flags & PR_CH_F_DATA)    pr_strlcat(flags, "data ",   sizeof flags);
 
         printf("  %5d  %6.3f MHz  %-8s  %s\n",
                c->num, c->freq_hz / 1000000.0, modes, flags);
     }
 
-    printf("\nLeistungsgrenzen:\n");
-    printf("  FM/PM  4 W ERP    Kanal 1..80\n");
-    printf("  AM     4 W ERP    Kanal 1..40\n");
-    printf("  SSB   12 W PEP    Kanal 1..40\n");
+    printf("\nPower limits:\n");
+    printf("  FM/PM  4 W ERP    Channel 1..80\n");
+    printf("  AM     4 W ERP    Channel 1..40\n");
+    printf("  SSB   12 W PEP    Channel 1..40\n");
 }
 
 static int cli(int argc, char **argv, const char *ini_path)
@@ -249,14 +249,14 @@ static int cli(int argc, char **argv, const char *ini_path)
         char err[256];
         pr_config cfg;
         if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
-            fprintf(stderr, "FEHLER: %s\n", err);
+            fprintf(stderr, "ERROR: %s\n", err);
             pr_config_free(&cfg);
             return 1;
         }
         if (argc > 3 && argv[3][0] != '\0') {
             if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
-                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
-                fprintf(stderr, "  vorhanden:");
+                fprintf(stderr, "ERROR: unknown station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  available:");
                 for (size_t k = 0; k < cfg.nstations; k++)
                     fprintf(stderr, " %s", cfg.stations[k].name);
                 fprintf(stderr, "\n");
@@ -264,8 +264,8 @@ static int cli(int argc, char **argv, const char *ini_path)
                 return 1;
             }
         }
-        printf("PRTERM CheckUp\n");
-        printf("  Geraet : %s\n", cfg.port);
+        printf("PRTERM checkup\n");
+        printf("  Device : %s\n", cfg.port);
         printf("  Station: %s\n\n",
                cfg.active_station[0] ? cfg.active_station : "(global)");
 
@@ -280,19 +280,19 @@ static int cli(int argc, char **argv, const char *ini_path)
         char err[256];
         pr_config cfg;
         if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
-            fprintf(stderr, "FEHLER: %s\n", err);
+            fprintf(stderr, "ERROR: %s\n", err);
             pr_config_free(&cfg);
             return 1;
         }
         /*
-         * Station waehlen. Ohne Angabe gilt die erste aktivierte - bei
-         * mehreren TNCs muss man aber bestimmen koennen, WELCHES Geraet
-         * geprueft oder zurueckgesetzt wird.
+         * Select a station. Without argument the first activated one
+         * applies - but with several TNCs one must be able to say WHICH
+         * device is checked or reset.
          */
         if (argc > 3 && argv[3][0] != '\0') {
             if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
-                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
-                fprintf(stderr, "  vorhanden:");
+                fprintf(stderr, "ERROR: unknown station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  available:");
                 for (size_t k = 0; k < cfg.nstations; k++)
                     fprintf(stderr, " %s", cfg.stations[k].name);
                 fprintf(stderr, "\n");
@@ -300,9 +300,9 @@ static int cli(int argc, char **argv, const char *ini_path)
                 return 1;
             }
         }
-        printf("PRTERM Zustandspruefung\n");
-        printf("  Geraet : %s\n", cfg.port);
-        printf("  Treiber: %s\n\n", cfg.rig_driver);
+        printf("PRTERM self-test\n");
+        printf("  Device : %s\n", cfg.port);
+        printf("  Driver : %s\n\n", cfg.rig_driver);
 
         pr_selftest st;
         int fails = pr_selftest_run(&cfg, &st);
@@ -315,14 +315,14 @@ static int cli(int argc, char **argv, const char *ini_path)
         char err[256];
         pr_config cfg;
         if (pr_config_load(&cfg, path, err, sizeof err) != 0) {
-            fprintf(stderr, "FEHLER: %s\n", err);
+            fprintf(stderr, "ERROR: %s\n", err);
             pr_config_free(&cfg);
             return 1;
         }
         if (argc > 3 && argv[3][0] != '\0') {
             if (pr_config_apply_station(&cfg, argv[3]) == NULL) {
-                fprintf(stderr, "FEHLER: unbekannte Station \"%s\"\n", argv[3]);
-                fprintf(stderr, "  vorhanden:");
+                fprintf(stderr, "ERROR: unknown station \"%s\"\n", argv[3]);
+                fprintf(stderr, "  available:");
                 for (size_t k = 0; k < cfg.nstations; k++)
                     fprintf(stderr, " %s", cfg.stations[k].name);
                 fprintf(stderr, "\n");
@@ -330,7 +330,7 @@ static int cli(int argc, char **argv, const char *ini_path)
                 return 1;
             }
         }
-        printf("PRTERM Notfall-Ruecksetzung fuer %s\n\n", cfg.port);
+        printf("PRTERM emergency reset for %s\n\n", cfg.port);
 
         pr_selftest st;
         int fails = pr_selftest_reset(&cfg, &st);
@@ -340,7 +340,7 @@ static int cli(int argc, char **argv, const char *ini_path)
     }
     if (strcmp(cmd, "--hash-password") == 0) {
         if (argc < 3) {
-            fprintf(stderr, "FEHLER: --hash-password benoetigt ein Passwort\n");
+            fprintf(stderr, "ERROR: --hash-password needs a password\n");
             return 2;
         }
         return cmd_hash_password(argv[2]);
@@ -355,7 +355,7 @@ static int cli(int argc, char **argv, const char *ini_path)
         size_t len = 0;
         char err[256];
         if (pr_read_file(path, &text, &len, err, sizeof err) != 0) {
-            fprintf(stderr, "FEHLER: %s\n", err);
+            fprintf(stderr, "ERROR: %s\n", err);
             return 1;
         }
         fwrite(text, 1, len, stdout);
@@ -363,7 +363,7 @@ static int cli(int argc, char **argv, const char *ini_path)
         return 0;
     }
 
-    fprintf(stderr, "FEHLER: unbekannte Option \"%s\"\n\n", cmd);
+    fprintf(stderr, "ERROR: unknown option \"%s\"\n\n", cmd);
     usage(stderr);
     return 2;
 }
@@ -381,7 +381,7 @@ static int run_cgi(pr_config *cfg)
     if (pr_request_parse(&req, err, sizeof err) != 0) {
         pr_response_init(&res);
         pr_response_text(&res, 400);
-        pr_buf_addf(&res.body, "FEHLER: %s\n", err);
+        pr_buf_addf(&res.body, "ERROR: %s\n", err);
         pr_response_emit(&res);
         pr_response_free(&res);
         return 1;
@@ -405,25 +405,25 @@ int main(int argc, char **argv)
     char ini_path[1024];
     find_ini(argc, argv, ini_path, sizeof ini_path);
 
-    /* Ohne Webserver: Werkzeugbetrieb */
+    /* No webserver: tool mode         */
     if (!pr_is_cgi()) {
         if (argc > 1)
             return cli(argc, argv, ini_path);
 
-        /* Ohne Argumente und ohne CGI: kurze Hilfe, kein Fehler */
+        /* No arguments and no CGI: short help, no error         */
         usage(stdout);
         return 0;
     }
 
-    /* CGI: Konfiguration laden */
+    /* CGI: load configuration  */
     char err[256];
     pr_config cfg;
     if (pr_config_load(&cfg, ini_path, err, sizeof err) != 0) {
         pr_response res;
         pr_response_init(&res);
         pr_response_text(&res, 500);
-        pr_buf_addf(&res.body, "PRTERM: Konfigurationsfehler\n\n%s\n\n"
-                               "(erwartet: %s)\n", err, ini_path);
+        pr_buf_addf(&res.body, "PRTERM: configuration error\n\n%s\n\n"
+                               "(expected: %s)\n", err, ini_path);
         pr_response_emit(&res);
         pr_response_free(&res);
         pr_config_free(&cfg);

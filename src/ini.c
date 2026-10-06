@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * ini.c - INI parser/writer, kommentar- und reihenfolgetreu.
+ * ini.c - INI parser/writer, comment- and order-preserving.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -17,8 +17,8 @@ typedef struct ini_entry {
     char *section;
     char *key;
     char *value;
-    long  line;        /* Index in lines[], -1 = neuer Eintrag */
-    bool  dirty;       /* per ini_set geaendert -> Zeile neu formatieren */
+    long  line;        /* Index into lines[], -1 = new entry   */
+    bool  dirty;       /* changed via ini_set -> reformat the line       */
 } ini_entry;
 
 struct ini {
@@ -26,13 +26,13 @@ struct ini {
     size_t     n;
     size_t     cap;
 
-    char     **lines;  /* rohe Zeilen; NULL = geloescht */
+    char     **lines;  /* raw lines; NULL = deleted     */
     size_t     nlines;
     size_t     caplines;
 };
 
 /* ======================================================================= */
-/* interne Helfer                                                          */
+/* internal helpers                                                          */
 /* ======================================================================= */
 
 static bool sec_eq(const char *a, const char *b)
@@ -106,8 +106,8 @@ static bool add_entry(ini *i, const char *section, const char *key,
     return true;
 }
 
-/* Entfernt einen abschliessenden Inline-Kommentar ( ; oder # ), sofern er
- * nicht in Anfuehrungszeichen steht und ihm Whitespace vorangeht. */
+/* Removes a trailing inline comment ( ; or # ), provided it is not
+ * inside quotes and is preceded by whitespace. */
 static void strip_inline_comment(char *s)
 {
     bool in_dq = false, in_sq = false;
@@ -136,7 +136,7 @@ static void unquote(char *s)
     }
 }
 
-/* Zerlegt "<key> = <value>"; true bei Erfolg. */
+/* Splits "<key> = <value>"; true on success.  */
 static bool split_kv(char *line, char **key, char **val)
 {
     char *p = line;
@@ -175,7 +175,7 @@ static bool split_kv(char *line, char **key, char **val)
 }
 
 /* ======================================================================= */
-/* Lebenszyklus                                                            */
+/* Lifecycle                                                               */
 /* ======================================================================= */
 
 ini *ini_new(void)
@@ -188,7 +188,7 @@ ini *ini_parse(const char *text, char *err, size_t errlen)
 {
     ini *i = ini_new();
     if (i == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return NULL;
     }
 
@@ -202,7 +202,7 @@ ini *ini_parse(const char *text, char *err, size_t errlen)
 
         char *raw = malloc(len + 1);
         if (raw == NULL) {
-            snprintf(err, errlen, "Speicher erschoepft (Zeile %ld)", lineno + 1);
+            snprintf(err, errlen, "out of memory (line %ld)", lineno + 1);
             ini_free(i);
             return NULL;
         }
@@ -213,24 +213,24 @@ ini *ini_parse(const char *text, char *err, size_t errlen)
 
         if (!lines_push(i, raw)) {
             free(raw);
-            snprintf(err, errlen, "Speicher erschoepft (Zeile %ld)", lineno + 1);
+            snprintf(err, errlen, "out of memory (line %ld)", lineno + 1);
             ini_free(i);
             return NULL;
         }
 
-        /* Parsing erfolgt auf einer KOPIE. raw muss unveraendert bleiben:
-         * genau diese Zeile wird spaeter wieder ausgegeben, damit
-         * Kommentare, Einrueckung und Schreibweise ueberleben. */
+        /* Parsing happens on a COPY. raw must stay unchanged: exactly this
+         * line is written out again later so that comments, indentation
+         * and spelling survive. */
         char *work = pr_strdup(raw);
         if (work == NULL) {
-            snprintf(err, errlen, "Speicher erschoepft (Zeile %ld)", lineno + 1);
+            snprintf(err, errlen, "out of memory (line %ld)", lineno + 1);
             ini_free(i);
             return NULL;
         }
         pr_trim(work);
 
         if (*work == '\0' || *work == ';' || *work == '#') {
-            /* Kommentar / Leerzeile - unveraendert lassen */
+            /* Comment / blank line - leave unchanged      */
         } else if (*work == '[') {
             char *end = strchr(work, ']');
             if (end != NULL) {
@@ -243,7 +243,7 @@ ini *ini_parse(const char *text, char *err, size_t errlen)
             if (split_kv(work, &k, &v)) {
                 if (!add_entry(i, cursec, k, v, lineno)) {
                     free(work);
-                    snprintf(err, errlen, "Speicher erschoepft (Zeile %ld)", lineno + 1);
+                    snprintf(err, errlen, "out of memory (line %ld)", lineno + 1);
                     ini_free(i);
                     return NULL;
                 }
@@ -286,7 +286,7 @@ void ini_free(ini *i)
 }
 
 /* ======================================================================= */
-/* lesen                                                                   */
+/* reading                                                                   */
 /* ======================================================================= */
 
 const char *ini_get(const ini *i, const char *section, const char *key,
@@ -338,7 +338,7 @@ size_t ini_section_count(const ini *i, const char *section)
 }
 
 /* ======================================================================= */
-/* schreiben                                                               */
+/* writing                                                                  */
 /* ======================================================================= */
 
 void ini_set(ini *i, const char *section, const char *key, const char *value)
@@ -389,7 +389,7 @@ bool ini_del(ini *i, const char *section, const char *key)
 
     if (ln >= 0 && (size_t)ln < i->nlines) {
         free(i->lines[ln]);
-        i->lines[ln] = NULL;   /* wird bei der Ausgabe uebersprungen */
+        i->lines[ln] = NULL;   /* skipped in the output              */
     }
     return true;
 }
@@ -427,7 +427,7 @@ void ini_foreach(const ini *i, const char *section, ini_iter_fn fn, void *ud)
 }
 
 /* ======================================================================= */
-/* Serialisierung - Kommentare bleiben erhalten                            */
+/* Serialization - comments are preserved                                  */
 /* ======================================================================= */
 
 static void emit_pending(pr_buf *out, const ini *i, unsigned char *done,
@@ -482,9 +482,9 @@ char *ini_dump(const ini *i)
     for (size_t ln = 0; ln < i->nlines; ln++) {
         const char *raw = i->lines[ln];
         if (raw == NULL)
-            continue;                       /* geloeschte Zeile */
+            continue;                       /* deleted line     */
 
-        /* Bevor eine neue Sektion beginnt: neue Schluessel der alten ausgeben */
+        /* Before a new section starts: emit new keys of the old one           */
         if (line_is_section(raw, secbuf, sizeof secbuf)) {
             emit_pending(&out, i, done, cursec);
             pr_strlcpy(cursec, secbuf, sizeof cursec);
@@ -493,9 +493,9 @@ char *ini_dump(const ini *i)
             continue;
         }
 
-        /* Eintrag zu dieser Zeile suchen und markieren. Geaenderte Eintraege
-         * werden neu formatiert, unveraenderte als Originalzeile ausgegeben
-         * - so bleiben Kommentare und Schreibweise erhalten. */
+        /* Find the entry for this line and mark it. Changed entries are
+         * reformatted, unchanged ones are emitted as the original line
+         * - this preserves comments and spelling. */
         bool replaced = false;
         for (size_t k = 0; k < i->n; k++) {
             if (i->ents[k].line != (long)ln || done[k])
@@ -515,7 +515,7 @@ char *ini_dump(const ini *i)
         }
     }
 
-    /* Rest: Sektionen die im Text nie vorkamen */
+    /* Rest: sections that never appeared in the text */
     emit_pending(&out, i, done, cursec);
     for (size_t k = 0; k < i->n; k++) {
         if (done[k])
@@ -533,7 +533,7 @@ int ini_save(const ini *i, const char *path, char *err, size_t errlen)
 {
     char *text = ini_dump(i);
     if (text == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
     int rc = pr_write_file_atomic(path, text, strlen(text), err, errlen);

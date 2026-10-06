@@ -1,12 +1,12 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * pages.h - Seitenkomposition und Request-Handling.
+ * pages.h - Page composition and request handling.
  *
- * PRTERM hat genau eine URL (siehe docs/ROUTING.md). pr_handle() entscheidet
- * ueber den action-Parameter, ob gerendert, JSON geliefert oder eine
- * Konfiguration geaendert wird.
+ * PRTERM has exactly one URL (see docs/ROUTING.md). pr_handle() decides
+ * via the action parameter whether to render, deliver JSON or change a
+ * configuration.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_PAGES_H
 #define PRTERM_PAGES_H
@@ -16,12 +16,12 @@
 #include "radio.h"
 #include "session.h"
 
-/* Bearbeitet eine Anfrage vollstaendig. */
+/* Handles a request completely.         */
 int pr_handle(pr_request *req, pr_response *res, pr_config *cfg);
 
-/* Seiten (fuer Tests einzeln aufrufbar) */
-/* Gibt den CSRF-Token als <meta>-Tag aus, damit das JavaScript ihn
- * mitschicken kann. */
+/* Pages (individually callable for tests) */
+/* Emits the CSRF token as a <meta> tag so the JavaScript can send
+ * it along. */
 void page_csrf_meta(pr_buf *out, const pr_session *sess);
 
 void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,

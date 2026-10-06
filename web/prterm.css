@@ -1,22 +1,22 @@
 /* ==========================================================================
-   PRTERM - CB & Amateurfunk Terminal
-   prterm.css - Erscheinungsbild
+   PRTERM - CB & Amateur Radio Terminal
+   prterm.css - Appearance
 
-   Fläche  : hell, silbrig, leichter Verlauf (gebürstetes Aluminium)
-   Schrift : dunkelblau -> schwarz (vertikaler Verlauf auf Überschriften)
-   Akzent  : Stahlblau
-   Kontur  : kühles Grau-Silber
+   Surface : light, silvery, slight gradient (brushed aluminium)
+   Text    : dark blue -> black (vertical gradient on headings)
+   Accent  : steel blue
+   Outline : cool grey silver
 
-   Alle Farben als Custom Properties - die Schrift und ihre Größe kommen
-   zusätzlich aus [ui] der prterm.ini und werden von der CGI-Schicht als
-   eigene Properties gesetzt.
+   All colors as custom properties - the font and its size additionally
+   come from [ui] in prterm.ini and are set as own properties by the
+   CGI layer.
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
    1. Tokens
    -------------------------------------------------------------------------- */
 :root {
-  /* Fläche - silbrig */
+  /* Surface - silvery */
   --bg-0:      #d6dae1;
   --bg-1:      #eef1f5;
   --bg-2:      #b7bec9;
@@ -24,34 +24,34 @@
   --panel:     #e4e8ee;
   --inset:     #c9cfd8;
 
-  /* Schrift - dunkelblau bis schwarz */
+  /* Text - dark blue to black        */
   --fg-top:    #17335f;
   --fg-bot:    #04070d;
   --fg:        #0c1c3c;
   --fg-dim:    #3b4c68;
   --fg-faint:  #6b7789;
 
-  /* Akzent & Kontur */
+  /* Accent & outline */
   --accent:    #1e4d8c;
   --accent-2:  #2f6bb8;
   --line:      #98a2b1;
   --line-2:    #78828f;
   --focus:     #2f6bb8;
 
-  /* Zustände */
+  /* States   */
   --rx:        #0e6b4c;
   --tx:        #8a4b08;
   --warn:      #8a6a08;
   --err:       #8c1f28;
   --banned:    #5c2029;
 
-  /* Schrift - kommt aus der INI, Default bis die CGI-Schicht setzt */
+  /* Font - comes from the INI, default until the CGI layer sets it */
   --pr-font:   ui-monospace, "SFMono-Regular", "DejaVu Sans Mono",
                "Liberation Mono", Consolas, monospace;
   --pr-font-size: 14px;
   --pr-line-height: 1.2;
 
-  /* Raster */
+  /* Grid   */
   --pad:       10px;
   --radius:    7px;
   --gap:       8px;
@@ -79,7 +79,7 @@
 }
 
 /* --------------------------------------------------------------------------
-   2. Grundgerüst
+   2. Basic frame
    -------------------------------------------------------------------------- */
 * { box-sizing: border-box; }
 
@@ -109,14 +109,14 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   3. Schriftverlauf - nur dort, wo er Wirkung hat
+   3. Text gradient - only where it has an effect
    -------------------------------------------------------------------------- */
 .grad {
   background-image: linear-gradient(180deg, var(--fg-top) 0%, var(--fg-bot) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  /* Fallback, falls background-clip nicht unterstuetzt wird */
+  /* Fallback if background-clip is not supported            */
   color: var(--fg);
 }
 
@@ -125,7 +125,7 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   4. Kopfleiste
+   4. Header bar
    -------------------------------------------------------------------------- */
 .topbar {
   display: flex;
@@ -160,7 +160,7 @@ body {
   text-transform: uppercase;
 }
 
-/* Status-Chips */
+/* Status chips */
 .status {
   display: flex;
   flex-wrap: wrap;
@@ -206,9 +206,9 @@ body {
 .nav { display: flex; gap: 5px; }
 
 /*
- * Stationsreiter links - bewusst im SELBEN Stil wie Terminal /
- * Administration rechts. Was gedrueckt ist, erkennt man auf beiden
- * Seiten gleich: Akzentfarbe, abgesetzte Kante, eingesunkene Flaeche.
+ * Station tabs on the left - deliberately in the SAME style as
+ * Terminal / Administration on the right. What is pressed looks the
+ * same on both sides: accent color, set-off edge, sunken surface.
  */
 .station-tabs { display: flex; gap: 5px; flex-wrap: wrap; }
 .station-tabs .stab {
@@ -217,7 +217,7 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   5. Bedienelemente - geprägtes Blech
+   5. Controls - embossed sheet metal
    -------------------------------------------------------------------------- */
 button, .btn {
   font: inherit;
@@ -281,7 +281,7 @@ input, select, textarea {
 input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 
 /* --------------------------------------------------------------------------
-   6. Hauptfläche
+   6. Main surface
    -------------------------------------------------------------------------- */
 .views {
   flex: 1 1 auto;
@@ -303,7 +303,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 .view.is-active { display: flex; }
 
 /* --------------------------------------------------------------------------
-   7. Terminal - maximaler Zeichenraum
+   7. Terminal - maximum character space
    -------------------------------------------------------------------------- */
 .term-wrap {
   flex: 1 1 auto;
@@ -345,11 +345,11 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
   background-clip: content-box;
 }
 
-/* Nachrichtenzeilen */
+/* Message lines     */
 .ln { display: block; }
 .ln .t   { color: var(--fg-faint); }
 .ln .who { font-weight: 600; }
-/* Welches Geraet die Nachricht aufgefangen hat - steht nur in "All". */
+/* Which device picked up the message - shown only in "All".          */
 .ln .dev {
   color: var(--accent);
   font-size: .88em;
@@ -368,7 +368,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 
 /* --------------------------------------------------------------------------
-   8. Sendezeile
+   8. Send bar
    -------------------------------------------------------------------------- */
 .txbar {
   display: flex;
@@ -383,7 +383,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 .txbar .spacer { flex: 0 0 auto; }
 
-/* Anzurufende Station - steht bewusst GANZ LINKS vor der Eingabe. */
+/* Station to call - deliberately placed at the far left before the input. */
 .txbar .call-lbl {
   flex: 0 0 auto;
   font-size: 11px;
@@ -414,7 +414,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 
 /* --------------------------------------------------------------------------
-   9. Karten & Formulare (Administration)
+   9. Cards & forms (administration)
    -------------------------------------------------------------------------- */
 .cards {
   display: grid;
@@ -469,7 +469,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 }
 
 /* --------------------------------------------------------------------------
-   10. Tabellen
+   10. Tables
    -------------------------------------------------------------------------- */
 table {
   width: 100%;
@@ -492,7 +492,7 @@ tr:last-child td { border-bottom: none; }
 td .btn { padding: 1px 8px; font-size: .88em; }
 
 /* --------------------------------------------------------------------------
-   11. Hinweise & Status
+   11. Hints & status
    -------------------------------------------------------------------------- */
 .note {
   padding: 6px 10px;
@@ -518,7 +518,7 @@ td .btn { padding: 1px 8px; font-size: .88em; }
 .badge-ban  { border-color: var(--banned); color: var(--banned); }
 
 /* --------------------------------------------------------------------------
-   12. Kanalraster
+   12. Channel grid
    -------------------------------------------------------------------------- */
 .channels {
   display: grid;
@@ -547,7 +547,7 @@ td .btn { padding: 1px 8px; font-size: .88em; }
 .ch.is-data::after { content: "\25a0"; color: var(--rx);     margin-left: 3px; }
 
 /* --------------------------------------------------------------------------
-   13. Kompaktdichte: maximaler Zeichenraum
+   13. Compact density: maximum character space
    -------------------------------------------------------------------------- */
 [data-density="compact"] .term { padding: 2px 6px; }
 [data-density="compact"] .views { padding: 6px; gap: 6px; }
@@ -568,4 +568,85 @@ td .btn { padding: 1px 8px; font-size: .88em; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* --------------------------------------------------------------------------
+   12. MailboxD view — the same interface, inverted
+   --------------------------------------------------------------------------
+
+   MailboxD is a separate service that PRTERM drives locally. It must be
+   tellable apart from the radio terminal at a glance, so the whole view is
+   drawn with the palette REVERSED rather than merely darkened: the silver
+   family takes the role of the text, the dark blue family takes the role of
+   the surface. That is a real inversion, not a third colour scheme — turn the
+   screen upside down and it still reads as the same product.
+
+   Scoped to the view, so the radio terminal around it stays untouched. */
+.view-invert {
+  --bg-0:      #0c1c3c;
+  --bg-1:      #17335f;
+  --bg-2:      #04070d;
+  --bg-3:      #02050c;
+  --panel:     #122448;
+  --inset:     #071227;
+
+  --fg-top:    #eef1f5;
+  --fg-bot:    #b7bec9;
+  --fg:        #d6dae1;
+  --fg-dim:    #b7bec9;
+  --fg-faint:  #98a2b1;
+
+  --accent:    #7fb0e8;
+  --accent-2:  #a8cbff;
+  --line:      #2c4470;
+  --line-2:    #1c2c4c;
+  --focus:     #7fb0e8;
+
+  --rx:        #3fbf8f;
+  --tx:        #e0a256;
+  --warn:      #d6b23c;
+  --err:       #e8636f;
+  --banned:    #a05060;
+
+  color: var(--fg);
+  background-color: var(--bg-0);
+  background-image:
+    linear-gradient(160deg, var(--bg-1) 0%, var(--bg-0) 45%, var(--bg-2) 100%);
+  color-scheme: dark;
+}
+
+/* The mailbox bar keeps the topbar's shape but sits inside the view */
+.mbox-bar {
+  background: none;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Local mailbox login — its own accounts, separate from the PRTERM admin */
+.mbox-login {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px var(--pad);
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.mbox-login[hidden] {
+  display: none;
+}
+
+.mbox-login .call-input {
+  background: var(--inset);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--pr-font);
+  font-size: var(--pr-font-size);
+}
+
+.mbox-login .call-input:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }

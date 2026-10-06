@@ -1,10 +1,10 @@
 /*
- * PRTERM - Test: Zustands- und Log-Persistenz
+ * PRTERM - Test: state and log persistence
  *
- * Lebend in einem eigenen Laufzeitverzeichnis, damit die Tests nichts
- * anfassen, was dem Betrieb gehoert.
+ * Living in its own runtime directory so the tests touch nothing
+ * that belongs to operation.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -25,7 +25,7 @@ static void wipe(void)
     char cmd[128];
     snprintf(cmd, sizeof cmd, "rm -rf %s", TESTDIR);
     if (system(cmd) != 0)
-        fprintf(stderr, "Warnung: %s konnte nicht entfernt werden\n", cmd);
+        fprintf(stderr, "Warning: %s could not be removed\n", cmd);
 }
 
 static pr_msg mk(char kind, const char *from, const char *text, int db)
@@ -58,7 +58,7 @@ int main(void)
     {
         pr_rig_state st;
         CHECK_INT(pr_state_load(&cfg, &st, err, sizeof err), 0);
-        CHECK_INT(st.freq_hz, cfg.freq_hz);   /* Default aus der Config */
+        CHECK_INT(st.freq_hz, cfg.freq_hz);   /* Default from the config */
 
         st.freq_hz = 27405000L;
         st.mode = PR_BAND_FM;
@@ -121,7 +121,7 @@ int main(void)
         }
         long c = pr_log_count(&cfg);
         CHECK(c > 0);
-        CHECK_INT(c, 50);            /* exakt max_log, keine Toleranz */
+        CHECK_INT(c, 50);            /* exactly max_log, no tolerance */
     }
 
     printf("\n== Nur die letzten N ==\n");
@@ -134,7 +134,7 @@ int main(void)
 
     printf("\n== Sonderzeichen im Text ==\n");
     {
-        /* Tabs und Zeilenumbrueche duerfen die Tabellenform nicht sprengen */
+        /* Tabs and line breaks must not break the tabular form             */
         pr_msg m = mk(PR_MSG_RX, "DL1ABC", "mit\ttab\nund\nbruch", -30);
         CHECK_INT(pr_log_append(&cfg, &m, err, sizeof err), 0);
 

@@ -1,11 +1,11 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * config.h - typisiertes Konfigurationsmodell ueber der prterm.ini.
+ * config.h - typed configuration model on top of prterm.ini.
  *
- * Die INI bleibt die einzige Persistenz; dieses Modell ist nur der
- * geparste, validierte Zugriff darauf.
+ * The INI remains the only persistence; this model is just the
+ * parsed, validated access to it.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_CONFIG_H
 #define PRTERM_CONFIG_H
@@ -20,41 +20,41 @@
 #define PR_CFG_STR  64
 #define PR_CFG_PATH 512
 
-/* Ban-Eintrag: Muster in [ban], Wert = Grund */
+/* Ban entry: pattern in [ban], value = reason */
 typedef struct pr_ban {
     char pattern[PR_CALLSIGN_MAX + 4];
     char reason[128];
 } pr_ban;
 
 /*
- * Eine Station = TNC + eigenes Funkgerät + eigene Antenne.
+ * One station = TNC + own radio + own antenna.
  *
- * Jede Station ist in sich geschlossen. radio_baud ist HARDWARE und wird
- * bewusst nicht an das Gerät gesendet - es ist eine Eigenschaft, keine
- * Anweisung.
+ * Each station is self-contained. radio_baud is HARDWARE and is
+ * deliberately not sent to the device - it is a property, not a
+ * command.
  */
 typedef struct pr_station {
-    char name[32];                 /* Sektionsname: [station:NAME]     */
+    char name[32];                 /* Section name: [station:NAME]     */
     char rig_driver[32];
     char port[PR_CFG_PATH];
-    long baud;                     /* seriell zum TNC                   */
-    long radio_baud;               /* FEST - Hardware, nicht änderbar   */
+    long baud;                     /* serial to the TNC                   */
+    long radio_baud;               /* FIXED - hardware, not changeable   */
     char modem[32];
     char serial_line[8];
-    char kiss_init[16];           /* "esc" oder "tapr" - siehe radio.h */
+    char kiss_init[16];           /* "esc" or "tapr" - see radio.h     */
     /*
-     * Wie gesendet wird:
-     *   kiss     KISS-Datenrahmen
-     *   unproto  KISS verlassen, "UNPROTO <Ziel> 0 <Text>" senden,
-     *            wieder KISS betreten
+     * How transmission works:
+     *   kiss     KISS data frames
+     *   unproto  leave KISS, send "UNPROTO <dest> 0 <text>",
+     *            re-enter KISS
      *
-     * TheFirmware (TNC2-Klasse) ignoriert KISS-Daten auf hybriden
-     * Aufbauten, waehrend UNPROTO aus dem Kommandomodus den Traeger
-     * zuverlaessig schaltet. Deshalb ist "unproto" die sichere Wahl.
+     * TheFirmware (TNC2 class) ignores KISS data on hybrid setups,
+     * while UNPROTO from command mode switches the carrier reliably.
+     * That is why "unproto" is the safe choice.
      */
     char tx_mode[16];
     char callerid[PR_CALLSIGN_MAX];
-    char antenna[64];              /* Beschreibung, für die Anzeige     */
+    char antenna[64];              /* Description, for display             */
     bool enabled;
 } pr_station;
 
@@ -76,9 +76,9 @@ typedef struct pr_config {
     char qth[PR_CFG_STR];
     char locator[16];
     /*
-     * Name der gerade aktiven Station. Wird von pr_config_apply_station
-     * gesetzt, damit der Treiber empfangene Nachrichten dem Geraet
-     * zuordnen kann, das sie aufgefangen hat.
+     * Name of the currently active station. Set by
+     * pr_config_apply_station so the driver can assign received
+     * messages to the device that picked them up.
      */
     char active_station[32];
 
@@ -86,21 +86,21 @@ typedef struct pr_config {
     pr_duplex duplex;
     char rig_driver[32];
     char port[PR_CFG_PATH];
-    long baud;                    /* seriell: Host <-> TNC            */
-    long radio_baud;              /* auf dem Kanal: 2400 / 1200       */
-    char modem[32];               /* Modem-Typ im TNC, z.B. tcm3105   */
+    long baud;                    /* serial: Host <-> TNC             */
+    long radio_baud;              /* on the channel: 2400 / 1200       */
+    char modem[32];               /* modem type in the TNC, e.g. tcm3105   */
     char serial_line[8];          /* "8n1", "7e1", ... */
     /*
-     * Wie das TNC in den KISS-Modus gefuehrt wird. Die Geraete
-     * unterscheiden sich hier, siehe docs/TNC-INIT.md:
-     *   esc   1B 40 4B  (ESC @K, ohne \r)   - Landolt TNC2C
-     *   tapr  "kiss on\r"                   - PK-TNC2, TAPR-Klasse
+     * How the TNC is put into KISS mode. The devices differ here,
+     * see docs/TNC-INIT.md:
+     *   esc   1B 40 4B  (ESC @K, no \r)     - Landolt TNC2C
+     *   tapr  "kiss on\r"                   - PK-TNC2, TAPR class
      */
     char kiss_init[16];
     char tx_mode[16];
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
-    long tx_power_mw;         /* Sendeleistung fuer die Compliance-Pruefung */
+    long tx_power_mw;         /* TX power for the compliance check          */
     int  rx_poll_ms;
     int  max_log;
 
@@ -110,6 +110,23 @@ typedef struct pr_config {
     char admin_pass_hash[160];
     int  session_ttl_min;
     bool allow_guest_tx;
+
+    /*
+     * [mailboxd]
+     *
+     * MailboxD is a separate daemon that PRTERM can drive locally. When this
+     * is off the "Mailbox" tab is not rendered at all - the button must not
+     * even be discoverable, so there is nothing to explain to an operator who
+     * never installed it.
+     */
+    bool mailboxd_enabled;
+    /*
+     * Installation directory. MailboxD runs entirely from its own directory;
+     * only service and start scripts are exposed to the system. Empty means
+     * use the built-in search order
+     * (/var/mailboxd, /usr/mailboxd, /usr/local/mailboxd).
+     */
+    char mailboxd_dir[PR_CFG_PATH];
 
     /* [callsign] */
     pr_call_rules callsign;
@@ -128,58 +145,58 @@ typedef struct pr_config {
     size_t nbans;
     size_t cap_bans;
 
-    /* [station:*] - mehrere vollständige Stationen */
+    /* [station:*] - several complete stations      */
     pr_station stations[PR_MAX_STATIONS];
     size_t nstations;
 
     /* [paths] */
     char runtime_dir[PR_CFG_PATH];
 
-    /* intern */
+    /* internal */
     char ini_path[PR_CFG_PATH];
     const pr_bandplan *bandplan;
     ini *raw;
 } pr_config;
 
-/* ---- Lebenszyklus ----------------------------------------------------- */
+/* ---- Lifecycle    ----------------------------------------------------- */
 void pr_config_defaults(pr_config *cfg);
 int  pr_config_load(pr_config *cfg, const char *path, char *err, size_t errlen);
 void pr_config_free(pr_config *cfg);
 
-/* Werte aus einem bereits geladenen INI uebernehmen (Validierung inkl.). */
+/* Adopt values from an already loaded INI (validation included).         */
 int  pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen);
 
-/* Aktuelle Werte zurueck in ein INI schreiben. */
+/* Write current values back into an INI.       */
 void pr_config_write(const pr_config *cfg, ini *i);
 
-/* ---- Ban-Liste -------------------------------------------------------- */
+/* ---- Ban list  -------------------------------------------------------- */
 bool pr_config_is_banned(const pr_config *cfg, const char *id);
 int  pr_config_add_ban(pr_config *cfg, const char *pattern, const char *reason);
 bool pr_config_del_ban(pr_config *cfg, const char *pattern);
 const pr_ban *pr_config_find_ban(const pr_config *cfg, const char *pattern);
 
-/* ---- Hilfsfunktionen -------------------------------------------------- */
+/* ---- Helper functions --------------------------------------------------- */
 const char *pr_duplex_name(pr_duplex d);
 pr_duplex   pr_duplex_from_name(const char *s);
 
-/* ---- Stationen ------------------------------------------------------- */
+/* ---- Stations  ------------------------------------------------------- */
 /*
- * Legt die Geraete-Einstellungen einer Station ueber die Konfiguration.
+ * Applies a station's device settings to the configuration.
  *
- * Jede Station ist eine vollstaendige Einheit: eigener TNC, eigenes
- * Funkgeraet, eigene Antenne. Wenn im Browser ein Stationsreiter
- * gewaehlt wird, muessen Port, Baud und Funk-Baudrate der STATION
- * gelten - nicht die globalen Werte aus [radio].
+ * Each station is a complete unit: own TNC, own radio, own antenna.
+ * When a station tab is selected in the browser, port, baud and
+ * radio baud of that STATION must apply - not the global values
+ * from [radio].
  *
- * Liefert die Station oder NULL wenn unbekannt.
+ * Returns the station or NULL if unknown.
  */
 const pr_station *pr_config_apply_station(pr_config *cfg, const char *name);
 const pr_station *pr_config_station(const pr_config *cfg, const char *name);
-/* Erste aktivierte Station, falls keine ausgewaehlt wurde. */
+/* First activated station, if none was selected.           */
 const pr_station *pr_config_default_station(const pr_config *cfg);
-/* Kanalnummer zur aktuellen Frequenz, -1 wenn keiner. */
+/* Channel number for the current frequency, -1 if none. */
 int         pr_config_channel(const pr_config *cfg);
-/* Frequenz zu einer Kanalnummer setzen; false wenn ungueltig. */
+/* Set frequency for a channel number; false if invalid.       */
 bool        pr_config_set_channel(pr_config *cfg, int num);
 
 #endif /* PRTERM_CONFIG_H */

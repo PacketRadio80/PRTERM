@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * arbiter.c - Senderegelung bei mehreren TNCs.
+ * arbiter.c - TX arbitration for multiple TNCs.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -19,18 +19,18 @@
 void pr_arbiter_path(const char *runtime_dir, long freq_hz,
                      char *dst, size_t dstlen)
 {
-    /* Eine Datei je Frequenz - Geraete auf verschiedenen Kanaelen
-     * behindern sich nicht. */
+    /* One file per frequency - devices on different channels do not
+     * interfere with each other. */
     snprintf(dst, dstlen, "%.480s/tx-%ld.lock", runtime_dir, freq_hz);
 }
 
 /*
- * Versucht, die Sperre zu holen. Liefert den Dateideskriptor oder -1.
+ * Tries to take the lock. Returns the file descriptor or -1.
  *
- * Es wird bewusst F_SETLK verwendet und nicht flock(): das ist reines
- * POSIX und damit auf Linux und FreeBSD identisch. Die Sperre faellt
- * automatisch, wenn der Prozess endet - ein haengengebliebenes CGI kann
- * den Kanal damit nicht dauerhaft blockieren.
+ * F_SETLK is used deliberately instead of flock(): it is plain POSIX
+ * and thus identical on Linux and FreeBSD. The lock is released
+ * automatically when the process ends - a hung CGI cannot block the
+ * channel permanently this way.
  */
 static int try_lock(int fd, const char *owner)
 {
@@ -44,7 +44,7 @@ static int try_lock(int fd, const char *owner)
     if (fcntl(fd, F_SETLK, &fl) != 0)
         return -1;
 
-    /* Eigentuemer merken - fuer Anzeige und Diagnose */
+    /* Remember owner - for display and diagnostics   */
     if (owner != NULL && owner[0] != '\0') {
         char buf[PR_ARBITER_OWNER_LEN + 2];
         pr_strlcpy(buf, owner, sizeof buf);
@@ -64,14 +64,14 @@ int pr_arbiter_acquire(const char *runtime_dir, long freq_hz,
 
     int fd = open(path, O_RDWR | O_CREAT, 0600);
     if (fd < 0) {
-        snprintf(err, errlen, "Sendesperre nicht anlegbar: %s", strerror(errno));
+        snprintf(err, errlen, "cannot create TX lock: %s", strerror(errno));
         return -1;
     }
 
     if (try_lock(fd, owner) == 0)
         return fd;
 
-    /* Belegt - mit Zeitlimit warten */
+    /* Busy - wait with a timeout    */
     long long deadline = pr_now_ms() + (timeout_ms > 0 ? timeout_ms : 0);
     for (;;) {
         if (try_lock(fd, owner) == 0)
@@ -85,13 +85,13 @@ int pr_arbiter_acquire(const char *runtime_dir, long freq_hz,
 
             if (other[0] != '\0')
                 snprintf(err, errlen,
-                         "der Kanal ist belegt - %s sendet gerade", other);
+                         "the channel is busy - %s is transmitting", other);
             else
-                snprintf(err, errlen, "der Kanal ist gerade belegt");
+                snprintf(err, errlen, "the channel is busy right now");
             close(fd);
             return -1;
         }
-        usleep(50000);                  /* 50 ms warten, dann erneut */
+        usleep(50000);                  /* Wait 50 ms, then retry    */
     }
 }
 
@@ -127,8 +127,8 @@ bool pr_arbiter_busy(const char *runtime_dir, long freq_hz,
     fl.l_start  = 0;
     fl.l_len    = 0;
 
-    /* Wenn wir die Sperre bekommen koennen, ist gerade niemand am Senden.
-     * Sofort wieder freigeben. */
+    /* If we can take the lock, nobody is transmitting right now.
+     * Release it immediately. */
     bool busy = (fcntl(fd, F_SETLK, &fl) != 0);
     if (!busy) {
         fl.l_type = F_UNLCK;

@@ -1,7 +1,7 @@
 /*
- * PRTERM - Test: KISS-Framing und AX.25-Rahmenbau
+ * PRTERM - Test: KISS framing and AX.25 frame building
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -18,18 +18,18 @@ int main(void)
         unsigned char d[] = "123456789";
         uint16_t crc = kiss_fcs(d, 9);
 
-        /* FCS anhaengen (little-endian) und pruefen */
+        /* Append FCS (little-endian) and check      */
         unsigned char frame[16];
         memcpy(frame, d, 9);
         frame[9]  = (unsigned char)(crc & 0xff);
         frame[10] = (unsigned char)(crc >> 8);
         CHECK(kiss_fcs_ok(frame, 11));
 
-        /* Ein vertauschtes Bit muss auffallen */
+        /* A swapped bit must be noticed       */
         frame[3] ^= 0xff;
         CHECK(!kiss_fcs_ok(frame, 11));
 
-        /* Zu kurze Rahmen sind ungueltig */
+        /* Frames that are too short are invalid */
         CHECK(!kiss_fcs_ok(frame, 1));
     }
 
@@ -56,15 +56,15 @@ int main(void)
         CHECK_INT(frame[0], KISS_FEND);
         CHECK_INT(frame[n - 1], KISS_FEND);
         CHECK_INT(frame[1], KISS_CMD_DATA);
-        /* Das FEND im Payload muss escaped sein */
-        CHECK(n == 1 + 1 + sizeof payload + 1 + 1);  /* +1 fuer das Escape */
+        /* The FEND in the payload must be escaped */
+        CHECK(n == 1 + 1 + sizeof payload + 1 + 1);  /* +1 for the escape  */
     }
 
     printf("\n== KISS Roundtrip ==\n");
     {
         unsigned char payload[256];
         for (size_t i = 0; i < sizeof payload; i++)
-            payload[i] = (unsigned char)(i & 0xff);   /* enthaelt FEND/FESC */
+            payload[i] = (unsigned char)(i & 0xff);   /* contains FEND/FESC */
 
         unsigned char frame[512];
         size_t n = kiss_encode(frame, sizeof frame, 2, KISS_CMD_DATA,
@@ -110,7 +110,7 @@ int main(void)
         unsigned char frame[16];
         unsigned char v = 1;
         size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
-        CHECK(n == 4);                    /* FEND | typ | wert | FEND */
+        CHECK(n == 4);                    /* FEND | type | value | FEND */
         CHECK_INT(frame[1], KISS_CMD_FULLDUPLEX);
         CHECK_INT(frame[2], 1);
     }
@@ -123,22 +123,22 @@ int main(void)
                                  (const unsigned char *)info, strlen(info));
         CHECK_INT(n, 16 + 5);
 
-        /* Zieladresse CQ, ohne Endekennung */
+        /* Destination address CQ, without end marker */
         char to[16], from[16];
         CHECK(call_from_ax25(frame, to, sizeof to));
         CHECK_STR(to, "CQ");
-        CHECK((frame[6] & 0x01) == 0);     /* kein Ende */
+        CHECK((frame[6] & 0x01) == 0);     /* no end    */
 
-        /* Quelladresse mit Endekennung */
+        /* Source address with end marker */
         CHECK(call_from_ax25(frame + 7, from, sizeof from));
         CHECK_STR(from, "DL1ABC-1");
-        CHECK((frame[13] & 0x01) == 1);    /* Ende gesetzt */
+        CHECK((frame[13] & 0x01) == 1);    /* end set      */
 
-        /* Control und PID */
+        /* Control and PID */
         CHECK_INT(frame[14], 0x03);
         CHECK_INT(frame[15], 0xF0);
 
-        /* Nutzdaten */
+        /* Payload   */
         CHECK(memcmp(frame + 16, info, 5) == 0);
     }
 

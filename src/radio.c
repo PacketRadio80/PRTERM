@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * radio.c - Driver-Registry und Komfort-Dispatch.
+ * radio.c - Driver registry and convenience dispatch.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -20,9 +20,6 @@ static const pr_rig_vtbl *const drivers[] = {
 #endif
 #if PRTERM_RIG_TMODEM
     &pr_rig_tmodem,
-#endif
-#if PRTERM_RIG_MAX25
-    &pr_rig_max25,
 #endif
 };
 
@@ -57,7 +54,7 @@ int pr_rig_open(pr_rig *r, const pr_config *cfg, char *err, size_t errlen)
     const pr_rig_vtbl *v = pr_rig_find(cfg->rig_driver);
     if (v == NULL) {
         snprintf(err, errlen,
-                 "unbekannter Rig-Treiber \"%s\" - verfuegbar sind %d Treiber",
+                 "unknown rig driver \"%s\" - %d drivers available",
                  cfg->rig_driver, (int)DRIVER_COUNT);
         return -1;
     }

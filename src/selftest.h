@@ -1,12 +1,12 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * selftest.h - Zustandspruefung der TNCs und Notfall-Ruecksetzung.
+ * selftest.h - TNC health check and emergency reset.
  *
- * Der Test ist bewusst TEIL des Programms und kein externes Skript:
- * wer betreibt, soll im Zweifel genau wissen, an welcher Stelle es hakt -
- * und im Notfall einen Reset ausloesen koennen, ohne Shell-Zugriff.
+ * The test is deliberately PART of the program and not an external
+ * script: whoever operates it should know exactly where things hang,
+ * and be able to trigger a reset in an emergency without shell access.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_SELFTEST_H
 #define PRTERM_SELFTEST_H
@@ -36,59 +36,59 @@ typedef struct pr_selftest {
     pr_test_result items[PR_SELFTEST_MAX];
     size_t n;
     bool   overall_ok;
-    char   firmware[128];   /* erkannte Firmware, falls vorhanden */
+    char   firmware[128];   /* recognized firmware, if present    */
 } pr_selftest;
 
 /*
- * Prueft das Geraet aus der Konfiguration:
- *   - existiert die Schnittstelle
- *   - laesst sich der Port oeffnen
- *   - liegen DTR/RTS an
- *   - antwortet das Geraet (ESC V)
- *   - wird die Firmware erkannt
- *   - passt das Profil zur Konfiguration
+ * Checks the device from the configuration:
+ *   - does the interface exist
+ *   - can the port be opened
+ *   - are DTR/RTS asserted
+ *   - does the device respond (ESC V)
+ *   - is the firmware recognized
+ *   - does the profile match the configuration
  *
- * Rueckgabe 0 wenn alles in Ordnung, sonst Anzahl der Fehler.
+ * Returns 0 if everything is fine, otherwise the number of errors.
  */
 int pr_selftest_run(const pr_config *cfg, pr_selftest *out);
 
 /*
- * Notfall-Ruecksetzung: fuehrt das Geraet ueber die bekannte
- * Ruecksetzfolge in einen definierten Zustand zurueck und prueft danach
- * erneut.
+ * Emergency reset: brings the device back to a defined state
+ * via the known reset sequence and then checks the device
+ * again.
  *
- *   11 18                    Puffer leeren (^Q^X)
- *   300 x 00 + JHOST 0       WA8DED-Hostmode verlassen
- *   C0 FF C0                 KISS verlassen / Firmware-Ruecksetz
- *   ESC V                    Probe
+ *   11 18                    flush buffer (^Q^X)
+ *   300 x 00 + JHOST 0       leave WA8DED host mode
+ *   C0 FF C0                 leave KISS / firmware reset
+ *   ESC V                    probe
  *
- * Rueckgabe 0 wenn das Geraet danach spricht.
+ * Returns 0 if the device speaks afterwards.
  */
 int pr_selftest_reset(const pr_config *cfg, pr_selftest *out);
 
 /*
- * Wiederherstellung: stellt sicher, dass das Geraet im KISS-Modus
- * steht und keinen Speicher voll haengender Rahmen mit sich traegt.
+ * Recovery: makes sure the device is in KISS mode and does not
+ * carry a memory full of stuck frames.
  *
- * ACHTUNG - die Reihenfolge ist entscheidend. Solange ein TNC im
- * KISS-Modus steht, wird JEDES geschriebene Byte gesendet. Ein "mal
- * eben nachfragen" wuerde also selbst senden. Darum:
+ * CAUTION - the order is crucial. As long as a TNC is in KISS mode,
+ * EVERY written byte is transmitted. A "quick query" would transmit
+ * itself. Therefore:
  *
- *   1. C0 FF C0        KISS verlassen - Kontrollrahmen, geht NICHT auf
- *                       die Luft
- *   2. Puffer leeren,   jetzt ist man im Kommandomodus und darf
- *      Hostmode raus    schreiben, ohne zu senden
- *   3. ESC V           Probe - bestaetigt den Kommandomodus
- *   4. KISS betreten    ESC @K bzw. "kiss on\r" je nach Profil
+ *   1. C0 FF C0        leave KISS - control frame, does NOT go on
+ *                       the air
+ *   2. flush buffer,    now one is in command mode and may write
+ *      leave host mode  without transmitting
+ *   3. ESC V           probe - confirms command mode
+ *   4. enter KISS      ESC @K or "kiss on\r" depending on the profile
  *
- * Rueckgabe 0 wenn alles in Ordnung, sonst Anzahl der Fehler.
+ * Returns 0 if everything is fine, otherwise the number of errors.
  */
 int pr_checkup(const pr_config *cfg, pr_selftest *out);
 
-/* Ausgabe fuer die Kommandozeile. */
+/* Output for the command line.    */
 void pr_selftest_print(const pr_selftest *st, FILE *f);
 
-/* Kurzform als eine Zeile. */
+/* Short form as a single line. */
 const char *pr_test_status_name(int status);
 
 #endif /* PRTERM_SELFTEST_H */

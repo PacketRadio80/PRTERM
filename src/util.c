@@ -2,7 +2,7 @@
  * PRTERM - CB & Amateur Radio Terminal
  * util.c - portable helpers (C11 + POSIX.1-2008/XSI).
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 

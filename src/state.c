@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * state.c - Persistenz des Rig-Zustands und des Nachrichtenlogs.
+ * state.c - Persistence of the rig state and the message log.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -17,7 +17,7 @@
 #include <unistd.h>
 
 /* ======================================================================= */
-/* Pfade                                                                   */
+/* Paths                                                                   */
 /* ======================================================================= */
 
 void pr_state_path(const pr_config *cfg, char *dst, size_t dstlen)
@@ -41,7 +41,7 @@ void pr_lock_path(const pr_config *cfg, char *dst, size_t dstlen)
 }
 
 /* ======================================================================= */
-/* Laufzeitverzeichnis                                                     */
+/* Runtime directory                                                       */
 /* ======================================================================= */
 
 int pr_runtime_init(const pr_config *cfg, char *err, size_t errlen)
@@ -70,14 +70,14 @@ void pr_state_unlock(int fd)
 }
 
 /* ======================================================================= */
-/* Rig-Zustand                                                             */
+/* Rig state                                                               */
 /* ======================================================================= */
 
 int pr_state_load(const pr_config *cfg, pr_rig_state *st, char *err, size_t errlen)
 {
     memset(st, 0, sizeof *st);
 
-    /* Vorbelegung aus der Konfiguration */
+    /* Defaults from the configuration   */
     st->freq_hz = cfg->freq_hz;
     st->mode    = cfg->mode;
     st->duplex  = cfg->duplex;
@@ -88,7 +88,7 @@ int pr_state_load(const pr_config *cfg, pr_rig_state *st, char *err, size_t errl
     char path[1024];
     pr_state_path(cfg, path, sizeof path);
     if (!pr_file_exists(path))
-        return 0;                       /* noch kein Zustand gespeichert */
+        return 0;                       /* no state saved yet            */
 
     ini *i = ini_load(path, err, errlen);
     if (i == NULL)
@@ -130,7 +130,7 @@ int pr_state_save(const pr_config *cfg, const pr_rig_state *st,
 {
     ini *i = ini_new();
     if (i == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
 
@@ -163,10 +163,10 @@ int pr_state_save(const pr_config *cfg, const pr_rig_state *st,
 }
 
 /* ======================================================================= */
-/* Nachrichten-Log                                                         */
+/* Message log                                                             */
 /* ======================================================================= */
 
-/* Tabs und Zeilenumbrueche aus dem Text entfernen - das Log ist tabellarisch. */
+/* Remove tabs and line breaks from the text - the log is tabular.             */
 static void sanitize(char *dst, size_t dstlen, const char *src)
 {
     size_t w = 0;
@@ -219,11 +219,11 @@ static size_t count_lines(const char *path)
 }
 
 /*
- * Haelt die Logdatei bei hoechstens max_log Zeilen.
+ * Keeps the log file at no more than max_log lines.
  *
- * Es wird bewusst exakt gezaehlt statt ueber eine Byte-Groesse geschaetzt:
- * die Grenze ist eine Zusage, keine Tendenz. Die Datei ist ohnehin auf
- * max_log Zeilen begrenzt, der Aufwand ist damit begrenzt und klein.
+ * Lines are deliberately counted exactly instead of being estimated by
+ * a byte size: the limit is a promise, not a tendency. The file is
+ * limited to max_log lines anyway, so the effort is limited and small.
  */
 static void maybe_compact(const pr_config *cfg, const char *path)
 {
@@ -239,7 +239,7 @@ static void maybe_compact(const pr_config *cfg, const char *path)
     if (pr_read_file(path, &text, &len, err, sizeof err) != 0)
         return;
 
-    /* Zaehlung koennte zwischenzeitlich gewachsen sein */
+    /* The count might have grown in the meantime       */
     lines = 0;
     for (size_t i = 0; i < len; i++)
         if (text[i] == '\n') lines++;
@@ -278,18 +278,18 @@ int pr_log_append(const pr_config *cfg, const pr_msg *m, char *err, size_t errle
     int n = snprintf(line, sizeof line, "%lld\t%c\t%s\t%d\t%s\n",
                      m->ts, m->kind, from, m->db, text);
     if (n < 0 || (size_t)n >= sizeof line) {
-        snprintf(err, errlen, "Nachricht zu lang");
+        snprintf(err, errlen, "message too long");
         return -1;
     }
 
     FILE *f = fopen(path, "ab");
     if (f == NULL) {
-        snprintf(err, errlen, "Log nicht beschreibbar: %s", path);
+        snprintf(err, errlen, "log not writable: %s", path);
         return -1;
     }
     size_t w = fwrite(line, 1, (size_t)n, f);
     if (fclose(f) != 0 || w != (size_t)n) {
-        snprintf(err, errlen, "Log nicht beschreibbar: %s", path);
+        snprintf(err, errlen, "log not writable: %s", path);
         return -1;
     }
 
@@ -314,7 +314,7 @@ int pr_log_tail(const pr_config *cfg, pr_msg *out, size_t cap, size_t *n,
     if (pr_read_file(path, &text, &len, err, errlen) != 0)
         return -1;
 
-    /* Zeilen zaehlen und auf die letzten cap beschraenken */
+    /* Count lines and limit to the last cap               */
     size_t lines = 0;
     for (size_t i = 0; i < len; i++)
         if (text[i] == '\n') lines++;

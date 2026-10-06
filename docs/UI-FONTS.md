@@ -1,63 +1,62 @@
-# PRTERM — Schrift & Zeichenraum
+# PRTERM — Font & Character Space
 
-> **Vorgabe:** *„Wir halten uns so viele Zeichen wie Schriftgröße und
-> Bildschirmauflösung hergeben auf, und in der .ini soll man .otf/.ttf
-> Fonts eintragen können samt Größe.“*
+> **Requirement:** *"We keep as many characters as font size and screen
+> resolution allow, and in the .ini one should be able to enter .otf/.ttf
+> fonts including their size."*
 
 ---
 
-## 1. Zwei unabhängige Stellschrauben
+## 1. Two independent controls
 
-| Was               | Woher                                      |
+| What              | Where from                                 |
 | ----------------- | ------------------------------------------ |
-| **Schrift**       | `.otf` / `.ttf` — Datei **+** Größe        |
-| **Zeichenraum**   | aus Schriftgröße × Auflösung **abgeleitet** |
+| **Font**          | `.otf` / `.ttf` — file **+** size          |
+| **Character grid**| **derived** from font size × resolution    |
 
-Die Schrift ist eine **Nutzer-Datei**, kein Build-Artefakt. Der Nutzer legt
-sie neben das CGI und trägt sie in der INI ein.
+The font is a **user file**, not a build artifact. The user puts it
+next to the CGI and enters it in the INI.
 
 ---
 
-## 2. Konfiguration `[ui]`
+## 2. Configuration `[ui]`
 
 ```ini
 [ui]
-font_file   = ./fonts/prterm.ttf   ; .otf oder .ttf
-font_size   = 14                   ; CSS-Pixel
-line_height = 1.2                  ; Vielfaches der Schriftgroesse
-density     = compact              ; compact = maximaler Zeichenraum
-rows        = 0                    ; 0 = ableiten
-columns     = 0                    ; 0 = ableiten
+font_file   = ./fonts/prterm.ttf   ; .otf or .ttf
+font_size   = 14                   ; CSS pixel
+line_height = 1.2                  ; multiple of the font size
+density     = compact              ; compact = maximum character grid
+rows        = 0                    ; 0 = derive
+columns     = 0                    ; 0 = derive
 theme       = dark
 ```
 
-`font_file` ist relativ zur `prterm.ini` oder absolut. Leer = System-Monospace.
-`font_size` wird als CSS-Custom-Property durchgereicht (`--pr-font-size`),
-nicht in CSS fest verdrahtet — damit ist die Schrift ohne Neubau wechselbar.
+`font_file` is relative to `prterm.ini` or absolute. Empty = system monospace.
+`font_size` is passed through as a CSS custom property (`--pr-font-size`),
+not hard-wired in CSS — so the font can be swapped without rebuilding.
 
 ---
 
-## 3. Auslieferung der Schrift
+## 3. Serving the font
 
-Die Datei ist zu gross und zu individuell, um ins Binary eingebettet zu
-werden (im Gegensatz zu `prterm.css`/`prterm.js`). Also dient eine
-Asset-Route:
+The file is too large and too individual to be embedded in the binary
+(in contrast to `prterm.css`/`prterm.js`). So an asset route serves it:
 
 ```
 GET /prterm.cgi/font
 ```
 
-- MIME je nach Endung: `font/ttf`, `font/otf`, `font/woff2`
+- MIME according to the extension: `font/ttf`, `font/otf`, `font/woff2`
 - `Cache-Control: public, max-age=31536000, immutable`
-- `Content-Length` korrekt, kein CGI-Caching
-- Pfad kommt ausschliesslich aus der INI — **keine** Pfadangabe aus dem Request
+- `Content-Length` correct, no CGI caching
+- the path comes exclusively from the INI — **no** path specification from the request
 
-> **Sicherheit:** die Route liefert *nur* die konfigurierte Schriftdatei aus.
-> Es gibt keinen generischen Datei-Download, sonst wird daraus ein
-> Lese-Orakel für das ganze Dateisystem.
+> **Security:** the route serves *only* the configured font file.
+> There is no generic file download, otherwise it becomes a
+> read oracle for the whole filesystem.
 
-Die `@font-face`-Regel wird im `<head>` dynamisch erzeugt, weil `format()`
-von der Endung abhängt:
+The `@font-face` rule is generated dynamically in the `<head>`, because `format()`
+depends on the extension:
 
 ```css
 @font-face {
@@ -70,52 +69,52 @@ von der Endung abhängt:
 
 ---
 
-## 4. Zeichenraum aus Größe und Auflösung
+## 4. Character grid from size and resolution
 
-Das Terminal nutzt die gesamte Fensterfläche. Das Raster wird **gemessen**,
-nicht geschätzt:
+The terminal uses the entire window area. The grid is **measured**,
+not guessed:
 
 ```
-Zeichenbreite  = Breite eines <span> mit 10 × "M"  / 10
-Zeilenhöhe     = font_size × line_height
-Spalten        = floor(nutzbare Breite  / Zeichenbreite)
-Zeilen         = floor(nutzbare Höhe   / Zeilenhöhe)
+character width = width of a <span> with 10 × "M"  /  10
+line height     = font_size × line_height
+columns         = floor(usable width   /  character width)
+rows            = floor(usable height  /  line height)
 ```
 
-- `height: 100dvh` (dvh, nicht vh — mobil korrekt)
-- `ResizeObserver` auf dem Terminal-Container, neu berechnen bei
-  Fensteränderung und bei Schriftwechsel
-- `rows = 0` / `columns = 0` in der INI ⇒ **abgeleitet**
-  `rows = n` / `columns = n` ⇒ erzwungen (z.B. für Screenshots oder
-  feste Konsolenbreite)
+- `height: 100dvh` (dvh, not vh — correct on mobile)
+- `ResizeObserver` on the terminal container, recompute on
+  window change and on font change
+- `rows = 0` / `columns = 0` in the INI ⇒ **derived**
+  `rows = n` / `columns = n` ⇒ forced (e.g. for screenshots or
+  fixed console width)
 
-Die abgeleiteten Werte gehen an die API, damit das Log genau so viele
-Zeilen liefert wie dargestellt werden — keine Scrollberechnung im Browser.
+The derived values go to the API, so the log delivers exactly as many
+lines as are displayed — no scroll calculation in the browser.
 
 ### `density = compact`
 
-Reduziert alles, was Zeichenraum frisst:
+Reduces everything that eats up character grid:
 
-- Zeilenabstand des Logs = exakt `line_height`
-- Statuszeile ein-/ausblendbar, standardmässig schmal
-- keine Innenabstände am Log, `margin: 0`
-- Scrollbar `overlay` wo verfügbar
-- TX-Zeile am unteren Rand, eine Zeile hoch
-
----
-
-## 5. Rastertreue
-
-Da die Schrift variabel ist, muss das Log **keine** festen Spaltenzahlen
-erzwingen. Lange Zeilen umbrechen (`white-space: pre-wrap`), damit die
-volle Breite genutzt wird. Wer will, setzt `columns` fest und bekommt
-eine harte Konsolenbreite mit `overflow-x` statt Umbruch.
+- line spacing of the log = exactly `line_height`
+- status line can be shown/hidden, narrow by default
+- no padding at the log, `margin: 0`
+- scrollbar `overlay` where available
+- TX line at the bottom edge, one line high
 
 ---
 
-## 6. Offene Punkte
+## 5. Grid fidelity
 
-- [ ] Font-Validierung: nur `.ttf`/`.otf`/`.woff2` zulassen, Magic prüfen
-- [ ] Fallback-Kette: `font_file` leer oder nicht lesbar ⇒ System-Monospace
-- [ ] `font_size` begrenzen (z.B. 6–96 px) gegen kaputte Eingaben
-- [ ] Optional: eingebettete Default-Schrift, falls keine angegeben ist
+Since the font is variable, the log must **not** enforce fixed column
+counts. Long lines wrap (`white-space: pre-wrap`), so the full width is used.
+Whoever wants, sets `columns` fixed and gets a hard console width with
+`overflow-x` instead of wrapping.
+
+---
+
+## 6. Open items
+
+- [ ] font validation: only allow `.ttf`/`.otf`/`.woff2`, check the magic
+- [ ] fallback chain: `font_file` empty or unreadable ⇒ system monospace
+- [ ] limit `font_size` (e.g. 6–96 px) against broken input
+- [ ] optional: embedded default font if none is given

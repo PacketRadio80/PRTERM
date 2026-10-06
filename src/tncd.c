@@ -1,34 +1,34 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * tncd.c - Haelt die seriellen Ports offen und fuehrt den KISS-Modus.
+ * tncd.c - Keeps the serial ports open and runs KISS mode.
  *
- * Warum ein eigener Prozess
- * =========================
- * Ein CGI endet nach jeder Anfrage. Faellt damit der letzte
- * Dateideskriptor, setzen USB-Serienadapter zurueck - auch ohne HUPCL.
- * Der TNC2C verlaesst daraufhin KISS und geht in einen Echo-only-
- * Zustand. Das war die Ursache dafuer, dass kein PTT mehr zustande
- * kam und die LED "unbestaetigte Daten" dauerhaft leuchtete.
+ * Why a separate process
+ * ======================
+ * A CGI ends after every request. When the last file descriptor goes
+ * away with it, USB serial adapters reset - even without HUPCL. The
+ * TNC2C then leaves KISS and enters an echo-only state. That was the
+ * cause for PTT no longer working and the "unacknowledged data" LED
+ * staying on permanently.
  *
- * Dieser Daemon haelt die Ports offen, betritt KISS einmal und haelt
- * es. Das CGI beruehrt das Geraet danach ueberhaupt nicht mehr.
+ * This daemon keeps the ports open, enters KISS once and holds it.
+ * The CGI never touches the device again afterwards.
  *
- * Aufbau
+ * Layout
  * ======
- *   prterm-tncd  haelt Port offen  ->  TNC2C / PK-TNC2
+ *   prterm-tncd  keeps port open  ->  TNC2C / PK-TNC2
  *        ^
- *        |  Unix-Socket je Station
- *   prterm.cgi   schreibt nur noch Befehle
+ *        |  Unix socket per station
+ *   prterm.cgi   only sends commands
  *
- * Befehle, zeilenweise, Antwort "OK ..." oder "ERR ...":
- *   PING            lebt der Daemon noch
- *   TX <hex>        Bytes senden
- *   RX              empfangene Bytes abholen
- *   STATUS          Zustand
- *   CHECKUP         KISS sicherstellen
- *   QUIT            Verbindung schliessen
+ * Commands, line by line, answer "OK ..." or "ERR ...":
+ *   PING            is the daemon still alive
+ *   TX <hex>        send bytes
+ *   RX              fetch received bytes
+ *   STATUS          state
+ *   CHECKUP         ensure KISS
+ *   QUIT            close connection
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -60,14 +60,14 @@
 typedef struct tncd_station {
     char        name[32];
     char        socket_path[512];
-    pr_config   cfg;          /* Geraete-Einstellungen dieser Station */
+    pr_config   cfg;          /* Device settings of this station      */
 
     pr_serial   ser;
     bool        open;
 
     int         listen_fd;
 
-    /* Empfangspuffer fuer das CGI */
+    /* Receive buffer for the CGI  */
     unsigned char rx[TNCD_RX_BUFFER];
     size_t        rx_len;
 
@@ -83,26 +83,26 @@ static void on_signal(int sig)
     g_stop = 1;
 }
 
-/* ---- KISS sicherstellen -------------------------------------------- */
+/* ---- Ensure KISS        -------------------------------------------- */
 
 /*
- * Reihenfolge ist entscheidend: zuerst KISS verlassen. Das ist ein
- * Kontrollrahmen und geht NICHT auf die Luft. Erst danach darf man
- * Kommandos schreiben - sonst sendet man selbst.
+ * The order is crucial: leave KISS first. That is a control frame
+ * and does NOT go on the air. Only then one may write commands -
+ * otherwise one transmits oneself.
  */
 static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
 {
     char e2[128];
     (void)errlen;
 
-    /* 1. KISS verlassen */
+    /* 1. Leave KISS     */
     {
         static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
         (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
         usleep(1500000);
     }
 
-    /* 2. Puffer leeren, Hostmode verlassen */
+    /* 2. Flush buffer, leave host mode     */
     {
         static const unsigned char flush[] = { 0x11, 0x18 };
         (void)pr_serial_write(&st->ser, flush, sizeof flush, e2, sizeof e2);
@@ -120,7 +120,7 @@ static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
         usleep(400000);
     }
 
-    /* 3. Probe - im Kommandomodus muss eine Antwort kommen */
+    /* 3. Probe - in command mode a response must come      */
     {
         static const unsigned char probe[] = { 0x1B, 0x56, 0x0D };
         (void)pr_serial_write(&st->ser, probe, sizeof probe, e2, sizeof e2);
@@ -132,9 +132,9 @@ static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
     }
 
     /*
-     * 4. MYCALL setzen. Das TNC muss seine eigene Kennung kennen -
-     *    ohne das geht die Ruecklaufkennung nicht, und manche Firmware
-     *    laesst ohne MYCALL gar keinen Rahmen zu.
+     * 4. Set MYCALL. The TNC must know its own identity - without
+     *    that the answerback ID does not work, and some firmware
+     *    accepts no frame at all without MYCALL.
      */
     {
         char myc[32];
@@ -148,18 +148,18 @@ static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
     }
 
     /*
-     * 5. Dauerkommandomodus.
+     * 5. Permanent command mode.
      *
-     * KISS wird bewusst NICHT betreten. Wer KISS betritt, muss es zum
-     * Senden wieder verlassen - und genau dieser Aus- und Wiedereinstieg
-     * ist es, der bei TheFirmware den Firmware-Ruecksetz ausloest und
-     * damit das Startmuster in den LEDs.
+     * KISS is deliberately NOT entered. Anyone entering KISS has to
+     * leave it again for transmitting - and exactly that exit and
+     * re-entry is what triggers the firmware reset on TheFirmware
+     * and thus the start pattern in the LEDs.
      *
-     * Stattdessen:
-     *   Senden  -> UNPROTO <Ziel> 0 <Text>
-     *   Empfang -> Monitortext
-     * Damit muss das Geraet nie umgeschaltet werden, und ein Ruecksetz
-     * bleibt die Ausnahme statt die Regel.
+     * Instead:
+     *   TX      -> UNPROTO <dest> 0 <text>
+     *   RX      -> monitor text
+     * This way the device never has to be switched, and a reset
+     * stays the exception instead of the rule.
      */
     {
         static const unsigned char mon[] = "MONITOR ON\r";
@@ -178,7 +178,7 @@ static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
                                    e2, sizeof e2);
     }
 
-    st->kiss_ok = true;   /* hier: Betriebsbereit, nicht KISS */
+    st->kiss_ok = true;   /* here: ready for operation, not KISS */
     st->last_check = time(NULL);
     if (err) err[0] = '\0';
     return true;
@@ -190,7 +190,7 @@ static bool station_open(tncd_station *st, char *err, size_t errlen)
 {
     int db, par, sb;
     if (!pr_serial_parse_line(st->cfg.serial_line, &db, &par, &sb)) {
-        snprintf(err, errlen, "Line \"%s\" ungueltig", st->cfg.serial_line);
+        snprintf(err, errlen, "line \"%s\" is invalid", st->cfg.serial_line);
         return false;
     }
 
@@ -202,19 +202,19 @@ static bool station_open(tncd_station *st, char *err, size_t errlen)
     return true;
 }
 
-/* ---- Empfang einsammeln -------------------------------------------- */
+/* ---- Collect reception  -------------------------------------------- */
 
 
 /*
- * Sichern, dass DTR/RTS anliegen, und warten bis der Sendepuffer
- * wirklich raus ist.
+ * Ensure DTR/RTS are asserted and wait until the transmit buffer is
+ * really drained.
  *
- * Zwei Dinge, die der MAX25-Stack so macht und die hier gefehlt haben:
- *   - DTR wird bei JEDEM Schreibvorgang erneut gesetzt. Faellt es
- *     zwischendurch, verlaesst der TNC2C den KISS-Modus.
- *   - tcdrain() wartet, bis die Bytes die Schnittstelle verlassen
- *     haben. Ohne das glaubt der Aufrufer, die Sendung sei vorbei,
- *     waehrend das TNC noch sendet.
+ * Two things that were missing here:
+ *   - DTR is re-asserted on EVERY write. If it drops in between, the
+ *     TNC2C leaves KISS mode.
+ *   - tcdrain() waits until the bytes have left the interface.
+ *     Without it the caller believes the transmission is over while
+ *     the TNC is still transmitting.
  */
 static void tx_prepare(pr_serial *ser)
 {
@@ -237,29 +237,29 @@ static void tx_finish(pr_serial *ser)
 
 
 /*
- * UNPROTO-Sendeweg.
+ * UNPROTO transmit path.
  *
- * TheFirmware (TNC2-Klasse) ignoriert auf hybriden Aufbauten oft
- * KISS-Datenrahmen, waehrend UNPROTO aus dem Kommandomodus den Traeger
- * zuverlaessig schaltet. Das ist genau das Symptom "PTT nur manchmal".
+ * TheFirmware (TNC2 class) often ignores KISS data frames on hybrid
+ * setups, while UNPROTO from command mode switches the carrier
+ * reliably. That is exactly the symptom "PTT only sometimes".
  *
- * Ablauf: KISS verlassen -> UNPROTO senden -> abwarten -> KISS wieder
- * betreten. Der Rahmen wird dabei ausgewertet, um Ziel und Text zu
- * bekommen; was sonst darin steckt, entfaellt.
+ * Sequence: leave KISS -> send UNPROTO -> wait -> re-enter KISS.
+ * The frame is evaluated to get destination and text; whatever else
+ * is in it is dropped.
  */
 static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len,
                         char *err, size_t errlen)
 {
-    /* AX.25-UI: Ziel(7) Quelle(7) Control(1) PID(1) Nutzdaten */
+    /* AX.25 UI: dest(7) src(7) Control(1) PID(1) payload      */
     if (len < 16) {
-        snprintf(err, errlen, "Rahmen zu kurz");
+        snprintf(err, errlen, "frame too short");
         return -1;
     }
 
     char dst[16], src[16];
     if (!call_from_ax25(frame, dst, sizeof dst) ||
         !call_from_ax25(frame + 7, src, sizeof src)) {
-        snprintf(err, errlen, "Rufzeichen nicht lesbar");
+        snprintf(err, errlen, "callsign not readable");
         return -1;
     }
 
@@ -273,9 +273,9 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
     tx_prepare(&st->ser);
 
     /*
-     * Das Geraet steht dauerhaft im Kommandomodus - es muss nichts
-     * umgeschaltet und damit auch nichts zurueckgesetzt werden.
-     * Nur die Kennung setzen wir sicherheitshalber.
+     * The device stays in command mode permanently - nothing has to
+     * be switched and thus nothing has to be reset. We only set the
+     * identity to be safe.
      */
     {
         char myc[32];
@@ -286,28 +286,28 @@ static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len
         (void)pr_serial_read_quiet(&st->ser, jj, sizeof jj, 300, 150, e2, sizeof e2);
     }
 
-    /* 3. UNPROTO <Ziel> 0 <Text> */
+    /* 3. UNPROTO <dest> 0 <text> */
     char cmd[PR_MSG_TEXT + 64];
     int k = snprintf(cmd, sizeof cmd, "UNPROTO %.9s 0 %s\r", dst, text);
     if (k <= 0 || (size_t)k >= sizeof cmd) {
-        snprintf(err, errlen, "Nachricht zu lang");
+        snprintf(err, errlen, "message too long");
         return -1;
     }
     if (pr_serial_write(&st->ser, cmd, (size_t)k, err, errlen) != 0)
         return -1;
     tx_finish(&st->ser);
 
-    /* 4. abwarten, bis das TNC gesendet hat */
+    /* 4. wait until the TNC has transmitted */
     usleep(1200000);
 
     /*
-     * BEWUSST kein KISS-Wiedereinstieg.
+     * DELIBERATELY no re-entry into KISS.
      *
-     * Das Geraet steht dauerhaft im Kommandomodus. Wuerde man am Ende
-     * ESC @K schicken, stuende das Geraet beim naechsten Senden wieder
-     * im KISS - und "UNPROTO ..." ginge als Daten auf die Luft statt
-     * als Befehl. Genau das liess die erste Sendung funktionieren und
-     * alle folgenden scheitern.
+     * The device stays in command mode permanently. If one sent ESC @K
+     * at the end, the device would be in KISS again for the next
+     * transmission - and "UNPROTO ..." would go on the air as data
+     * instead of as a command. Exactly that made the first
+     * transmission work and all following ones fail.
      */
     return 0;
 }
@@ -322,7 +322,7 @@ static void station_pump(tncd_station *st)
     if (n <= 0)
         return;
 
-    /* Platz schaffen */
+    /* Make room      */
     if (st->rx_len + (size_t)n > sizeof st->rx) {
         size_t drop = st->rx_len + (size_t)n - sizeof st->rx;
         memmove(st->rx, st->rx + drop, st->rx_len - drop);
@@ -332,7 +332,7 @@ static void station_pump(tncd_station *st)
     st->rx_len += (size_t)n;
 }
 
-/* ---- Befehle -------------------------------------------------------- */
+/* ---- Commands --------------------------------------------------------- */
 
 static void answer(int fd, const char *fmt, ...)
 {
@@ -345,7 +345,7 @@ static void answer(int fd, const char *fmt, ...)
         return;
     line[n++] = '\n';
     if (write(fd, line, (size_t)n) != n) {
-        /* Gegenstelle weg - wird beim naechsten poll() auffallen */
+        /* Peer gone - will show up in the next poll()            */
     }
 }
 
@@ -369,13 +369,13 @@ static void handle_command(tncd_station *st, int fd, const char *line)
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_TX)) {
         if (!st->open) {
-            answer(fd, "ERR Geraet nicht offen");
+            answer(fd, "ERR device not open");
             return;
         }
         unsigned char data[4200];
         size_t n = pr_tncsock_hex_decode(data, sizeof data, arg);
         if (n == 0) {
-            answer(fd, "ERR keine Daten");
+            answer(fd, "ERR no data");
             return;
         }
         char err[256];
@@ -389,9 +389,9 @@ static void handle_command(tncd_station *st, int fd, const char *line)
         }
         tx_prepare(&st->ser);
         /*
-         * PERSIST vor JEDEM Rahmen erneut setzen - so macht es der
-         * MAX25-Stack. Gehen die Parameter verloren (etwa nach einem
-         * ungewollten Ruecksetz), waere sonst die Sendung unzuverlaessig.
+         * Re-set PERSIST before EVERY frame. If the parameters get
+         * lost (e.g. after an unwanted reset), transmission would be
+         * unreliable otherwise.
          */
         {
             unsigned char pf[4] = { 0xC0, 0x02, 255, 0xC0 };
@@ -417,13 +417,13 @@ static void handle_command(tncd_station *st, int fd, const char *line)
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_STATUS)) {
         answer(fd, "OK station=%s kiss=%s open=%s port=%s",
                st->name,
-               st->kiss_ok ? "ja" : "nein",
-               st->open ? "ja" : "nein",
+               st->kiss_ok ? "yes" : "no",
+               st->open ? "yes" : "no",
                st->cfg.port);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_CHECKUP)) {
         if (!st->open) {
-            answer(fd, "ERR Geraet nicht offen");
+            answer(fd, "ERR device not open");
             return;
         }
         char err[256];
@@ -434,7 +434,7 @@ static void handle_command(tncd_station *st, int fd, const char *line)
         answer(fd, "OK");
 
     } else {
-        answer(fd, "ERR unbekannter Befehl %.60s", cmd);
+        answer(fd, "ERR unknown command %.60s", cmd);
     }
 }
 
@@ -452,7 +452,7 @@ static int make_listener(const char *path, char *err, size_t errlen)
     memset(&sa, 0, sizeof sa);
     sa.sun_family = AF_UNIX;
     if (strlen(path) >= sizeof sa.sun_path) {
-        snprintf(err, errlen, "Socketpfad zu lang");
+        snprintf(err, errlen, "socket path too long");
         close(fd);
         return -1;
     }
@@ -465,7 +465,7 @@ static int make_listener(const char *path, char *err, size_t errlen)
         close(fd);
         return -1;
     }
-    /* Nur der Webserver-Zugriff braucht die Datei */
+    /* Only webserver access needs the file        */
     (void)chmod(path, 0660);
 
     if (listen(fd, 4) != 0) {
@@ -476,7 +476,7 @@ static int make_listener(const char *path, char *err, size_t errlen)
     return fd;
 }
 
-/* ---- Hauptschleife --------------------------------------------------- */
+/* ---- Main loop     --------------------------------------------------- */
 
 static int run_daemon(tncd_station *stations, size_t nst)
 {
@@ -509,11 +509,11 @@ static int run_daemon(tncd_station *stations, size_t nst)
         for (size_t i = 0; i < nst; i++) {
             tncd_station *st = &stations[i];
 
-            /* Empfang vom Geraet einsammeln */
+            /* Collect reception from the device */
             if (st->open)
                 station_pump(st);
 
-            /* Neue Verbindung annehmen und sofort abarbeiten */
+            /* Accept a new connection and process it immediately */
             if (st->listen_fd >= 0) {
                 struct pollfd one = { st->listen_fd, POLLIN, 0 };
                 if (poll(&one, 1, 0) > 0 && (one.revents & POLLIN)) {
@@ -536,16 +536,16 @@ static int run_daemon(tncd_station *stations, size_t nst)
         }
 
         /*
-         * KISS periodisch nachhalten.
+         * Maintain KISS periodically.
          *
-         * WICHTIG: die Nachpruefung darf den Betrieb NICHT stoeren.
-         * enter_kiss() braucht rund 3 Sekunden und schreibt dabei auf
-         * den Port. Fiel das in eine Sendefolge, ging genau diese
-         * Sendung verloren - man sah nur einzelne PTT statt aller.
+         * IMPORTANT: the re-check must NOT disturb operation.
+         * enter_kiss() takes about 3 seconds and writes to the port
+         * during that time. If that fell into a transmit sequence, that
+         * transmission was lost - one saw only single PTT instead of all.
          *
-         * Deshalb: nur nachhalten, wenn seit der letzten Sendung genug
-         * Ruhe war, und grundsaetzlich selten. Der Daemon haelt den Port
-         * offen, KISS geht darum nicht von selbst verloren.
+         * Therefore: only re-check when there has been enough quiet
+         * since the last transmission, and generally rarely. The daemon
+         * keeps the port open, so KISS is not lost by itself.
          */
         for (size_t i = 0; i < nst; i++) {
             tncd_station *st = &stations[i];
@@ -571,13 +571,13 @@ static int run_daemon(tncd_station *stations, size_t nst)
 
 static void usage(void)
 {
-    printf("prterm-tncd - haelt die TNC-Ports offen und fuehrt KISS\n\n");
-    printf("Aufruf:\n");
+    printf("prterm-tncd - keeps the TNC ports open and runs KISS\n\n");
+    printf("Usage:\n");
     printf("  prterm-tncd [PRTERM.INI]\n\n");
-    printf("Je Station wird ein Unix-Socket gelegt:\n");
+    printf("One Unix socket is created per station:\n");
     printf("  <runtime_dir>/tnc-<station>.sock\n\n");
-    printf("Der Daemon bleibt im Vordergrund. Fuer den Dauerbetrieb\n");
-    printf("uebernimmt systemd den Start (siehe docs/).\n");
+    printf("The daemon stays in the foreground. For continuous operation\n");
+    printf("systemd takes over the start (see docs/).\n");
 }
 
 int main(int argc, char **argv)
@@ -599,7 +599,7 @@ int main(int argc, char **argv)
     char err[512];
     pr_config base;
     if (pr_config_load(&base, ini_path, err, sizeof err) != 0) {
-        fprintf(stderr, "FEHLER: %s\n", err);
+        fprintf(stderr, "ERROR: %s\n", err);
         return 1;
     }
 
@@ -619,8 +619,8 @@ int main(int argc, char **argv)
 
         pr_strlcpy(st->name, src->name, sizeof st->name);
         {
-            /* ueber einen Zwischenpuffer - sonst meckert der Compiler
-             * wegen ueberlappender Zielobjekte im selben Struct */
+            /* via an intermediate buffer - otherwise the compiler complains
+             * about overlapping target objects in the same struct */
             char tmp[512];
             snprintf(tmp, sizeof tmp, "%.400s/tnc-%.32s.sock",
                      st->cfg.runtime_dir, st->name);
@@ -631,33 +631,33 @@ int main(int argc, char **argv)
         printf("  %-10s %s\n", st->name, st->cfg.port);
 
         if (!station_open(st, err, sizeof err)) {
-            fprintf(stderr, "FEHLER %s: %s\n", st->name, err);
+            fprintf(stderr, "ERROR %s: %s\n", st->name, err);
             continue;
         }
         if (!enter_command_mode(st, err, sizeof err)) {
-            fprintf(stderr, "FEHLER %s: %s\n", st->name, err);
+            fprintf(stderr, "ERROR %s: %s\n", st->name, err);
             pr_serial_close(&st->ser);
             continue;
         }
 
         st->listen_fd = make_listener(st->socket_path, err, sizeof err);
         if (st->listen_fd < 0) {
-            fprintf(stderr, "FEHLER %s: %s\n", st->name, err);
+            fprintf(stderr, "ERROR %s: %s\n", st->name, err);
             pr_serial_close(&st->ser);
             continue;
         }
 
-        printf("  %-10s KISS aktiv, Socket %s\n", st->name, st->socket_path);
+        printf("  %-10s KISS active, socket %s\n", st->name, st->socket_path);
         nst++;
     }
 
     if (nst == 0) {
-        fprintf(stderr, "FEHLER: keine Station konnte gestartet werden\n");
+        fprintf(stderr, "ERROR: no station could be started\n");
         pr_config_free(&base);
         return 1;
     }
 
-    printf("\nprterm-tncd laeuft - %zu Station(en), Strg+C beendet\n", nst);
+    printf("\nprterm-tncd running - %zu station(s), Ctrl+C to stop\n", nst);
     fflush(stdout);
 
     int rc = run_daemon(stations, nst);

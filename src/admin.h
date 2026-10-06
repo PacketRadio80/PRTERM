@@ -1,11 +1,11 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * admin.h - Admin-Aktionen.
+ * admin.h - Admin actions.
  *
- * Der Administrationsbereich hat keine eigene URL; diese Funktion wertet
- * die Aktionen derselben Adresse aus (siehe docs/ROUTING.md).
+ * The administration area has no own URL; this function evaluates the
+ * actions of the same address (see docs/ROUTING.md).
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_ADMIN_H
 #define PRTERM_ADMIN_H
@@ -14,7 +14,7 @@
 #include "config.h"
 #include "session.h"
 
-/* Bearbeitet eine Admin-Aktion und setzt die Antwort auf JSON. */
+/* Handles an admin action and sets the response to JSON.       */
 int pr_admin_action(pr_request *req, pr_response *res,
                     pr_config *cfg, pr_session *sess);
 

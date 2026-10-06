@@ -1,25 +1,25 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * bands.c - Bandplan-Daten + Compliance-Schicht.
+ * bands.c - Band plan data + compliance layer.
  *
- * Rechtsgrundlage des enthaltenen Plans:
- *   Bundesnetzagentur, Allgemeinzuteilung von Frequenzen fuer den CB-Funk,
- *   Vfg. Nr. 21/2021 (sowie Nachfolgeregelungen).
+ * Legal basis of the included plan:
+ *   BNetzA, general allocation of frequencies for CB radio,
+ *   Vfg. Nr. 21/2021 (and successor regulations).
  *
- * Kanalbandbreite 10 kHz (§ 2 Abs. 1).
+ * Channel bandwidth 10 kHz (§ 2 (1)).
  *
- *   F3E/G3E (FM/PM)  4 W ERP    Kanal 1..80
- *   A3E     (AM)      4 W ERP    Kanal 1..40
- *   J3E     (SSB)    12 W PEP    Kanal 1..40
+ *   F3E/G3E (FM/PM)  4 W ERP    channel 1..80
+ *   A3E     (AM)      4 W ERP    channel 1..40
+ *   J3E     (SSB)    12 W PEP    channel 1..40
  *
- * WICHTIG - Lage der Bereiche:
- *   Kanal  1..40 : 26.965 .. 27.405 MHz   (CEPT, harmonisiert)
- *   Kanal 41..80 : 26.565 .. 26.955 MHz   (nationaler Erweiterungsbereich)
- * Die Zusatzkanäle liegen UNTERHALB der CEPT-Kanäle.
+ * IMPORTANT - position of the ranges:
+ *   channel  1..40 : 26.965 .. 27.405 MHz   (CEPT, harmonized)
+ *   channel 41..80 : 26.565 .. 26.955 MHz   (national extension range)
+ * The extra channels lie BELOW the CEPT channels.
  *
- * Kanaldreher: 22 = 27.225 -> 23 = 27.255 -> 24 = 27.235 -> 25 = 27.245
+ * Channel shuffle: 22 = 27.225 -> 23 = 27.255 -> 24 = 27.235 -> 25 = 27.245
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -29,12 +29,12 @@
 #include <string.h>
 
 /* ======================================================================= */
-/* Kanaltabelle CB-Funk Deutschland                                        */
+/* Channel table CB radio Germany                                          */
 /* ======================================================================= */
 
-/* Hilfsmakros fuer die Tabelle */
-#define M_ALL  (PR_BAND_FM | PR_BAND_AM | PR_BAND_SSB)  /* Kanal 1..40  */
-#define M_FM   (PR_BAND_FM)                             /* Kanal 41..80 */
+/* Helper macros for the table  */
+#define M_ALL  (PR_BAND_FM | PR_BAND_AM | PR_BAND_SSB)  /* Channel 1..40  */
+#define M_FM   (PR_BAND_FM)                             /* Channel 41..80 */
 
 #define F_DATA    (PR_CH_F_DATA)
 #define F_GW      (PR_CH_F_GATEWAY)
@@ -42,16 +42,16 @@
 #define F_NONE    (0u)
 
 static const pr_channel cb_de_channels[] = {
-    /* ---- CEPT-Bereich, Kanal 1..40 (26.965 .. 27.405 MHz) ------------ */
-    {  1, 26965000L, M_ALL, F_NONE },  /* Anrufkanal FM                   */
-    {  2, 26975000L, M_ALL, F_NONE },  /* Berg-DX (inoffiziell)           */
+    /* ---- CEPT range, channel 1..40 (26.965 .. 27.405 MHz) ------------ */
+    {  1, 26965000L, M_ALL, F_NONE },  /* Call channel FM                   */
+    {  2, 26975000L, M_ALL, F_NONE },  /* Mountain DX (unofficial)           */
     {  3, 26985000L, M_ALL, F_NONE },
-    {  4, 27005000L, M_ALL, F_NONE },  /* Anrufkanal AM                   */
+    {  4, 27005000L, M_ALL, F_NONE },  /* Call channel AM                   */
     {  5, 27015000L, M_ALL, F_NONE },
-    {  6, 27025000L, M_ALL, F_DATA },  /* Datenkanal                      */
-    {  7, 27035000L, M_ALL, F_DATA },  /* Datenkanal                      */
+    {  6, 27025000L, M_ALL, F_DATA },  /* Data channel                      */
+    {  7, 27035000L, M_ALL, F_DATA },  /* Data channel                      */
     {  8, 27055000L, M_ALL, F_NONE },
-    {  9, 27065000L, M_ALL, F_NONE },  /* Notrufkanal                     */
+    {  9, 27065000L, M_ALL, F_NONE },  /* Emergency channel                 */
     { 10, 27075000L, M_ALL, F_NONE },
     { 11, 27085000L, M_ALL, F_GW   },  /* Gateway                         */
     { 12, 27105000L, M_ALL, F_NONE },
@@ -65,29 +65,29 @@ static const pr_channel cb_de_channels[] = {
     { 20, 27205000L, M_ALL, F_NONE },
     { 21, 27215000L, M_ALL, F_NONE },
     { 22, 27225000L, M_ALL, F_NONE },
-    { 23, 27255000L, M_ALL, F_NONE },  /* <== Kanaldreher                 */
-    { 24, 27235000L, M_ALL, F_DATA },  /* <== Kanaldreher                 */
-    { 25, 27245000L, M_ALL, F_DATA },  /* <== Kanaldreher                 */
+    { 23, 27255000L, M_ALL, F_NONE },  /* <== channel shuffle               */
+    { 24, 27235000L, M_ALL, F_DATA },  /* <== channel shuffle               */
+    { 25, 27245000L, M_ALL, F_DATA },  /* <== channel shuffle               */
     { 26, 27265000L, M_ALL, F_NONE },
     { 27, 27275000L, M_ALL, F_NONE },
     { 28, 27285000L, M_ALL, F_NONE },
     { 29, 27295000L, M_ALL, F_GW   },  /* Gateway                         */
-    { 30, 27305000L, M_ALL, F_NONE },  /* DX (inoffiziell)                */
-    { 31, 27315000L, M_ALL, F_NONE },  /* DX (inoffiziell)                */
+    { 30, 27305000L, M_ALL, F_NONE },  /* DX (unofficial)                   */
+    { 31, 27315000L, M_ALL, F_NONE },  /* DX (unofficial)                   */
     { 32, 27325000L, M_ALL, F_NONE },
     { 33, 27335000L, M_ALL, F_NONE },
     { 34, 27345000L, M_ALL, F_GW   },  /* Gateway                         */
     { 35, 27355000L, M_ALL, F_NONE },
     { 36, 27365000L, M_ALL, F_NONE },
     { 37, 27375000L, M_ALL, F_NONE },
-    { 38, 27385000L, M_ALL, F_NONE },  /* DX LSB (inoffiziell)            */
+    { 38, 27385000L, M_ALL, F_NONE },  /* DX LSB (unofficial)               */
     { 39, 27395000L, M_ALL, F_GW   },  /* Gateway                         */
     { 40, 27405000L, M_ALL, F_GW   },  /* Gateway                         */
 
-    /* ---- Nationaler Erweiterungsbereich, Kanal 41..80 ---------------- */
-    /*      Nur FM/PM zulaessig.                                       */
-    { 41, 26565000L, M_FM, F_GW   },  /* Gateway, DX (inoffiziell)       */
-    { 42, 26575000L, M_FM, F_NONE },  /* DX (inoffiziell)                */
+    /* ---- National extension range, channel 41..80     ---------------- */
+    /*      Only FM/PM permitted.                                       */
+    { 41, 26565000L, M_FM, F_GW   },  /* Gateway, DX (unofficial)        */
+    { 42, 26575000L, M_FM, F_NONE },  /* DX (unofficial)                 */
     { 43, 26585000L, M_FM, F_NONE },
     { 44, 26595000L, M_FM, F_NONE },
     { 45, 26605000L, M_FM, F_NONE },
@@ -97,8 +97,8 @@ static const pr_channel cb_de_channels[] = {
     { 49, 26645000L, M_FM, F_NONE },
     { 50, 26655000L, M_FM, F_NONE },
     { 51, 26665000L, M_FM, F_NONE },
-    { 52, 26675000L, M_FM, F_DATA },  /* Datenkanal                      */
-    { 53, 26685000L, M_FM, F_DATA },  /* Datenkanal                      */
+    { 52, 26675000L, M_FM, F_DATA },  /* Data channel                      */
+    { 53, 26685000L, M_FM, F_DATA },  /* Data channel                      */
     { 54, 26695000L, M_FM, F_NONE },
     { 55, 26705000L, M_FM, F_NONE },
     { 56, 26715000L, M_FM, F_NONE },
@@ -121,8 +121,8 @@ static const pr_channel cb_de_channels[] = {
     { 73, 26885000L, M_FM, F_NONE },
     { 74, 26895000L, M_FM, F_NONE },
     { 75, 26905000L, M_FM, F_NONE },
-    { 76, 26915000L, M_FM, F_DATA },  /* Datenkanal                      */
-    { 77, 26925000L, M_FM, F_DATA },  /* Datenkanal                      */
+    { 76, 26915000L, M_FM, F_DATA },  /* Data channel                      */
+    { 77, 26925000L, M_FM, F_DATA },  /* Data channel                      */
     { 78, 26935000L, M_FM, F_NONE },
     { 79, 26945000L, M_FM, F_NONE },
     { 80, 26955000L, M_FM, F_GW   },  /* Gateway                         */
@@ -131,9 +131,9 @@ static const pr_channel cb_de_channels[] = {
 static const pr_bandplan bandplans[] = {
     {
         "cb-de",
-        "CB-Funk Deutschland (80 Kanäle)",
+        "CB radio Germany (80 channels)",
         "DE",
-        "BNetzA Allgemeinzuteilung CB-Funk, Vfg. Nr. 21/2021",
+        "BNetzA general allocation CB radio, Vfg. Nr. 21/2021",
         10000L,
         cb_de_channels,
         sizeof cb_de_channels / sizeof cb_de_channels[0]
@@ -143,7 +143,7 @@ static const pr_bandplan bandplans[] = {
 #define BANDPLAN_COUNT (sizeof bandplans / sizeof bandplans[0])
 
 /* ======================================================================= */
-/* Zugriff                                                                 */
+/* Access                                                                  */
 /* ======================================================================= */
 
 const pr_bandplan *pr_bandplan_default(void)
@@ -197,14 +197,14 @@ const pr_channel *pr_bandplan_at_freq(const pr_bandplan *bp, long freq_hz)
 }
 
 /* ======================================================================= */
-/* Leistungsgrenzen                                                        */
+/* Power limits                                                            */
 /* ======================================================================= */
 
 /*
- * Sendearten und zulaessige Spitzenleistung, je Kanalbereich.
+ * Transmit modes and permitted peak power, per channel range.
  *
- *   Kanal 1..40 :  FM/PM 4 W ERP   |  AM 4 W ERP   |  SSB 12 W PEP
- *   Kanal 41..80:  FM/PM 4 W ERP   |  (AM/SSB unzulaessig)
+ *   channel 1..40 :  FM/PM 4 W ERP   |  AM 4 W ERP   |  SSB 12 W PEP
+ *   channel 41..80:  FM/PM 4 W ERP   |  (AM/SSB not permitted)
  */
 #define MW_FM_CEPT    4000L
 #define MW_AM_CEPT    4000L
@@ -229,7 +229,7 @@ long pr_bandplan_max_power_mw(const pr_bandplan *bp, int num, unsigned mode)
 }
 
 /* ======================================================================= */
-/* Betriebsarten                                                           */
+/* Operating modes                                                         */
 /* ======================================================================= */
 
 const char *pr_band_mode_name(unsigned mode)
@@ -238,7 +238,7 @@ const char *pr_band_mode_name(unsigned mode)
     case PR_BAND_FM:  return "fm";
     case PR_BAND_AM:  return "am";
     case PR_BAND_SSB: return "ssb";
-    default:          return "unbekannt";
+    default:          return "unknown";
     }
 }
 
@@ -249,7 +249,7 @@ unsigned pr_band_mode_from_name(const char *s)
     if (strcmp(s, "fm") == 0 || strcmp(s, "FM") == 0)  return PR_BAND_FM;
     if (strcmp(s, "am") == 0 || strcmp(s, "AM") == 0)  return PR_BAND_AM;
     if (strcmp(s, "ssb") == 0 || strcmp(s, "SSB") == 0) return PR_BAND_SSB;
-    /* TNC-Betriebsarten */
+    /* TNC operating modes */
     if (strcmp(s, "lsb") == 0 || strcmp(s, "LSB") == 0) return PR_BAND_SSB;
     if (strcmp(s, "usb") == 0 || strcmp(s, "USB") == 0) return PR_BAND_SSB;
     return 0;
@@ -289,18 +289,18 @@ bool pr_bandplan_tx_freq_ok(const pr_bandplan *bp,
                             char *err, size_t errlen)
 {
     if (bp == NULL) {
-        snprintf(err, errlen, "kein Bandplan aktiv");
+        snprintf(err, errlen, "no band plan active");
         return false;
     }
     if (freq_hz <= 0) {
-        snprintf(err, errlen, "ungueltige Frequenz");
+        snprintf(err, errlen, "invalid frequency");
         return false;
     }
 
     const pr_channel *ch = pr_bandplan_at_freq(bp, freq_hz);
     if (ch == NULL) {
         snprintf(err, errlen,
-                 "Frequenz %ld Hz liegt nicht auf einem zugeteilten Kanal (%s)",
+                 "frequency %ld Hz is not on an allocated channel (%s)",
                  freq_hz, bp->name);
         return false;
     }
@@ -310,12 +310,12 @@ bool pr_bandplan_tx_freq_ok(const pr_bandplan *bp,
         pr_band_modes_str(ch->modes, mbuf, sizeof mbuf);
         if (ch->num >= 41 && ch->num <= 80) {
             snprintf(err, errlen,
-                     "Kanal %d (%ld Hz): nur FM/PM zulaessig (nationaler "
-                     "Erweiterungsbereich), nicht %s",
+                     "channel %d (%ld Hz): only FM/PM allowed (national "
+                     "extension range), not %s",
                      ch->num, freq_hz, pr_band_mode_name(mode));
         } else {
             snprintf(err, errlen,
-                     "Kanal %d (%ld Hz): %s ist nicht zulaessig, erlaubt sind %s",
+                     "channel %d (%ld Hz): %s is not allowed, allowed are %s",
                      ch->num, freq_hz, pr_band_mode_name(mode), mbuf);
         }
         return false;
@@ -334,7 +334,7 @@ bool pr_bandplan_tx_allowed(const pr_bandplan *bp,
 
     const pr_channel *ch = pr_bandplan_at_freq(bp, freq_hz);
     if (ch == NULL) {
-        snprintf(err, errlen, "Kanal nicht gefunden");
+        snprintf(err, errlen, "channel not found");
         return false;
     }
 
@@ -342,13 +342,13 @@ bool pr_bandplan_tx_allowed(const pr_bandplan *bp,
         long max = pr_bandplan_max_power_mw(bp, ch->num, mode);
         if (max == 0) {
             snprintf(err, errlen,
-                     "keine Leistungsgrenze fuer Kanal %d / %s",
+                     "no power limit for channel %d / %s",
                      ch->num, pr_band_mode_name(mode));
             return false;
         }
         if (power_mw > max) {
             snprintf(err, errlen,
-                     "Leistung %ld mW uebersteigt %ld mW (Kanal %d, %s)",
+                     "power %ld mW exceeds %ld mW (channel %d, %s)",
                      power_mw, max, ch->num, pr_band_mode_name(mode));
             return false;
         }

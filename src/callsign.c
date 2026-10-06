@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * callsign.c - CALLID/CALLERID-Validierung und Ban-Matching.
+ * callsign.c - CALLID/CALLERID validation and ban matching.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -22,7 +22,7 @@ void pr_call_rules_default(pr_call_rules *r)
 }
 
 /* ======================================================================= */
-/* Zeichenklassen                                                          */
+/* Character classes                                                       */
 /* ======================================================================= */
 
 static bool is_call_char(char c)
@@ -35,7 +35,7 @@ static bool is_digit(char c)
     return c >= '0' && c <= '9';
 }
 
-/* Prueft 1..maxlen Zeichen [A-Z0-9] in einem String ohne Suffix. */
+/* Checks 1..maxlen chars [A-Z0-9] in a string without suffix.    */
 static bool body_ok(const char *s, int maxlen)
 {
     if (s == NULL || s[0] == '\0')
@@ -51,7 +51,7 @@ static bool body_ok(const char *s, int maxlen)
 }
 
 /* ======================================================================= */
-/* CALLID - ohne Suffix                                                    */
+/* CALLID - without suffix                                                 */
 /* ======================================================================= */
 
 bool callid_valid(const char *s, const pr_call_rules *r)
@@ -73,7 +73,7 @@ bool callid_normalize(char *dst, size_t dstlen, const char *src,
     if (src == NULL)
         return false;
 
-    /* Blanks/Zeilenumbrueche raus, gross schreiben */
+    /* Strip blanks/newlines, uppercase             */
     size_t w = 0;
     for (const char *p = src; *p != '\0' && w + 1 < dstlen; p++) {
         char c = *p;
@@ -89,7 +89,7 @@ bool callid_normalize(char *dst, size_t dstlen, const char *src,
 }
 
 /* ======================================================================= */
-/* CALLERID - mit optionaler SSID                                          */
+/* CALLERID - with optional SSID                                           */
 /* ======================================================================= */
 
 bool callerid_split(const char *s, char *base, size_t baselen, int *ssid)
@@ -119,7 +119,7 @@ bool callerid_split(const char *s, char *base, size_t baselen, int *ssid)
         int v = 0;
         const char *p = dash + 1;
         if (*p == '\0')
-            return false;               /* "-" ohne Ziffer ist ungueltig */
+            return false;               /* "-" without a digit is invalid */
         for (; *p != '\0'; p++) {
             if (!is_digit(*p))
                 return false;
@@ -153,12 +153,12 @@ bool callerid_valid(const char *s, const pr_call_rules *r)
         return false;
 
     if (ssid < 0)
-        return true;                    /* ohne SSID immer ok            */
+        return true;                    /* without SSID always ok            */
 
     if (!r->allow_ssid)
         return false;
 
-    /* SSID-Digitzahl pruefen */
+    /* Check SSID digit count */
     int digits = 0;
     const char *dash = strchr(s, '-');
     for (const char *p = dash + 1; *p != '\0'; p++)
@@ -195,7 +195,7 @@ bool anyid_valid(const char *s, const pr_call_rules *r)
 }
 
 /* ======================================================================= */
-/* Muster                                                                  */
+/* Patterns                                                                */
 /* ======================================================================= */
 
 bool call_pattern_match(const char *pattern, const char *text)
@@ -203,7 +203,7 @@ bool call_pattern_match(const char *pattern, const char *text)
     if (pattern == NULL || text == NULL)
         return false;
 
-    /* Grossschreibungs-Vergleich: Rufzeichen sind case-insensitiv. */
+    /* Case comparison: callsigns are case-insensitive.             */
     const char *p = pattern, *t = text;
     const char *star = NULL, *star_t = NULL;
 
@@ -248,13 +248,13 @@ const char *call_pattern_list_match(const char *const *patterns, size_t npattern
 }
 
 /* ======================================================================= */
-/* AX.25-Wire-Encoding                                                     */
+/* AX.25 wire encoding                                                     */
 /* ======================================================================= */
 
 /*
- * Adressformat: 6 Byte Call (blank-gefuellt), jedes Byte << 1,
- * danach 1 Byte SSID: ((ssid & 0x0F) << 1) | 0x60,
- * letztes Adressbyte bekommt zusaetzlich 0x01 (Endekennung).
+ * Address format: 6-byte call (space padded), each byte << 1,
+ * then 1 byte SSID: ((ssid & 0x0F) << 1) | 0x60,
+ * the last address byte additionally gets 0x01 (end marker).
  */
 bool call_to_ax25(const char *id, unsigned char dst[7])
 {
@@ -291,7 +291,7 @@ bool call_from_ax25(const unsigned char src[7], char *dst, size_t dstlen)
         body[i] = (char)(src[i] >> 1);
     body[6] = '\0';
 
-    /* Blanks rechts entfernen */
+    /* Trim trailing blanks    */
     int n = 6;
     while (n > 0 && body[n - 1] == ' ')
         n--;
@@ -307,12 +307,12 @@ bool call_from_ax25(const unsigned char src[7], char *dst, size_t dstlen)
 }
 
 /* ======================================================================= */
-/* AX.25-UI-Rahmen                                                         */
+/* AX.25 UI frames                                                         */
 /* ======================================================================= */
 
 /*
- * Control 0x03 = UI, PID 0xF0 = ohne Unterprotokoll.
- * Das Endekennung-Bit (0x01) wird an der Quelladresse gesetzt.
+ * Control 0x03 = UI, PID 0xF0 = no subprotocol.
+ * The end marker bit (0x01) is set on the source address.
  */
 #define AX25_CTRL_UI 0x03u
 #define AX25_PID_NONE 0xF0u
@@ -328,12 +328,12 @@ size_t ax25_ui_frame(unsigned char *out, size_t outcap,
     if (outcap < 7 + 7 + 2 + infolen)
         return 0;
 
-    /* Zieladresse - ohne Endekennung */
+    /* Destination address - without end marker */
     if (!call_to_ax25(to, addr))
         return 0;
     memcpy(out, addr, 7);
 
-    /* Quelladresse - MIT Endekennung */
+    /* Source address - WITH end marker */
     if (!call_to_ax25(from, addr))
         return 0;
     addr[6] |= 0x01u;

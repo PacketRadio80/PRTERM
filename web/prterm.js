@@ -1,19 +1,19 @@
 /* ==========================================================================
-   PRTERM - CB & Amateurfunk Terminal
+   PRTERM - CB & Amateur Radio Terminal
    prterm.js
 
-   Eine URL, mehrere Ansichten. Kein Framework, kein Build-Schritt.
+   One URL, several views. No framework, no build step.
    ========================================================================== */
 (function () {
   "use strict";
 
   /* ----------------------------------------------------------------------
-     Zustand
+     State
      ---------------------------------------------------------------------- */
   var S = {
     view: "terminal",
-    station: "",    /* nur EMPFANGS-Filter, Reiter links */
-    txdev: "",      /* nur SENDEGERAET, Auswahl in der Sendezeile */
+    station: "",    /* RX filter only, tabs on the left  */
+    txdev: "",      /* transmitting device only, selection in the send bar */
     since: 0,
     msgs: [],
     callerid: "",
@@ -33,7 +33,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     Zeichenraster: so viele Zeichen wie Schriftgröße und Auflösung hergeben
+     Character grid: as many characters as font size and resolution allow
      ---------------------------------------------------------------------- */
   function measureGrid() {
     var term = $("term");
@@ -45,7 +45,7 @@
       "position:absolute;visibility:hidden;white-space:pre;" +
       "font-family:" + getComputedStyle(term).fontFamily + ";" +
       "font-size:" + getComputedStyle(term).fontSize + ";";
-    probe.textContent = "MMMMMMMMMM"; /* 10 Zeichen */
+    probe.textContent = "MMMMMMMMMM"; /* 10 chars   */
     document.body.appendChild(probe);
 
     var charW = probe.getBoundingClientRect().width / 10;
@@ -64,7 +64,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     Ansichten umschalten (keine URL, kein Reload)
+     Switch views (no URL, no reload)
      ---------------------------------------------------------------------- */
   function switchView(name) {
     S.view = name;
@@ -84,6 +84,45 @@
   }
 
   /* ----------------------------------------------------------------------
+     Mailbox (MailboxD) — local mailbox and BBS, rendered inverted.
+
+     MailboxD is a separate daemon. This is only PRTERM's view onto it: the
+     tab strip, the local mailbox login and the administration button. The
+     link to the daemon itself is a separate step.
+     ---------------------------------------------------------------------- */
+  function mboxPanel(name) {
+    qsa("[data-mbox]").forEach(function (x) {
+      x.classList.toggle("is-active", x.getAttribute("data-mbox") === name);
+    });
+    var login = $("mbox-loginform");
+    if (login) login.hidden = (name !== "login");
+  }
+
+  function mboxFlash(msg, kind) {
+    var el = $("mbox-flash");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = "note" + (kind ? " " + kind : "");
+    el.hidden = !msg;
+  }
+
+  function mboxNotConnected() {
+    mboxFlash("MailboxD is not connected — the daemon is not linked yet.", "warn");
+  }
+
+  function sendMailboxCmd() {
+    var i = $("mbox-cmd");
+    if (!i) return;
+    if (!i.value.trim()) return;
+    mboxNotConnected();
+    i.value = "";
+  }
+
+  function mboxLoginSubmit() {
+    mboxNotConnected();
+  }
+
+  /* ----------------------------------------------------------------------
      Terminal
      ---------------------------------------------------------------------- */
   function scrollTerm() {
@@ -98,21 +137,21 @@
   }
 
   /*
-   * Zwei Sichten auf dieselben Nachrichten:
+   * Two views on the same messages:
    *
-   *   All            alles, was auf dem Kanal faellt - jeder Rundspruch,
-   *                  jedes fremde Gespraech. Gebannte Stationen bleiben
-   *                  draussen (filtert bereits der Server).
-   *   Frequenz@Baud  nur, was an DIESE Station adressiert ist.
+   *   All            everything falling on the channel - every
+   *                  broadcast, every foreign conversation. Banned
+   *                  stations stay outside (the server filters them).
+   *   freq@baud      only what is addressed to THIS station.
    *
-   * In "All" steht bei jeder Nachricht das Geraet, das sie aufgefangen
-   * hat - sonst waeren mehrere TNCs auf einem Kanal nicht zu unterscheiden.
+   * In "All" every message names the device that picked it up -
+   * otherwise several TNCs on one channel could not be told apart.
    */
   function msgVisible(m) {
-    /* System- und eigene Meldungen immer */
+    /* System and own messages always     */
     if (m.kind !== "R") return true;
     if (!S.station) return true;
-    /* Stationstab: nur an mich adressiert */
+    /* Station tab: only addressed to me   */
     var me = (S.callerid || "").toUpperCase();
     var to = (m.to || "").toUpperCase();
     return me !== "" && to === me;
@@ -141,7 +180,7 @@
       html +=
         '<span class="' + cls + '">' +
         '<span class="t">' + time + "</span> " +
-        /* Welches Geraet hat es gefangen - nur in "All" noetig. */
+        /* Which device picked it up - only needed in "All".     */
         (m.station && !S.station
           ? '<span class="dev">@' + esc(m.station) + "</span> " : "") +
         (m.from ? '<span class="who">' + esc(m.from) + "</span> " : "") +
@@ -151,14 +190,14 @@
     }
     if (html) {
       t.insertAdjacentHTML("beforeend", html);
-      /* begrenzen, damit das DOM nicht waechst */
+      /* limit so the DOM does not grow         */
       while (t.childNodes.length > 900) t.removeChild(t.firstChild);
       if (stick) scrollTerm();
     }
   }
 
-  /* Terminal vollstaendig aus dem Bestand neu aufbauen - wird beim
-   * Umschalten zwischen "All" und einer Station gebraucht. */
+  /* Rebuild the terminal completely from the stock - needed when
+   * switching between "All" and a station. */
   function rerenderLog() {
     var t = $("term");
     if (!t) return;
@@ -178,9 +217,9 @@
     set("s-mode", String(s.mode || "").toUpperCase());
     set("s-channel", s.channel > 0 ? s.channel : "—");
 
-    // Auswahlkaesten aus dem Zustand zurueckschreiben. Ohne das zeigt der
-    // Mode-Kasten nach einer abgelehnten Umstellung weiterhin den neuen
-    // Wert, obwohl sich am Geraet nichts geaendert hat.
+    // Write the checkboxes back from the state. Without this the mode
+    // box keeps showing the new value after a rejected switch, although
+    // nothing changed on the device.
     var sel = $("selmode");
     if (sel && sel.value !== (s.mode || "")) sel.value = s.mode || "";
     var dsel = $("selduplex");
@@ -192,21 +231,21 @@
     var d = $("s-duplex");
     if (d) {
       var full = s.duplex === "full";
-      d.textContent = full ? "FULL-DUPLEX" : "HALB-DUPLEX";
+      d.textContent = full ? "FULL-DUPLEX" : "HALF-DUPLEX";
       d.className = "chip " + (full ? "is-duplex-full" : "is-duplex-half");
     }
 
     var l = $("s-link");
     if (l) {
-      l.textContent = s.link_ok ? (s.device || "verbunden") : "getrennt";
+      l.textContent = s.link_ok ? (s.device || "connected") : "disconnected";
       l.className = "chip " + (s.link_ok ? "is-link-ok" : "is-link-bad");
     }
 
     var note = $("duplexnote");
     if (note) {
       note.textContent = s.duplex === "full"
-        ? "Vollduplex — der Empfang läuft während des Sendens weiter."
-        : "Halbduplex — während des Sendens wird nicht empfangen.";
+        ? "Full duplex — reception continues while transmitting."
+        : "Half duplex — no reception while transmitting.";
       note.className = "note " + (s.duplex === "full" ? "note-ok" : "note-warn");
     }
   }
@@ -217,18 +256,18 @@
   }
 
   /* ----------------------------------------------------------------------
-     Aktionen
+     Actions
      ---------------------------------------------------------------------- */
-    /* Die aktive Station bestimmt, mit WELCHER Hardware gearbeitet wird.
-     Jeder Reiter steht fuer eine vollstaendige Station. */
+    /* The active station decides WHICH hardware is used.
+     Every tab stands for a complete station. */
   function withStation(data) {
-    /* Senden laeuft ueber das gewaehlte Geraet, NICHT ueber den
-     * Empfangsfilter. Beide sind unabhaengig - 1200 und 2400 Baud
-     * verstehen einander nicht, wer sendet, waehlt man ausdruecklich. */
+    /* Sending runs via the selected device, NOT via the receive
+     * filter. Both are independent - 1200 and 2400 baud do not
+     * understand each other, the sender is chosen explicitly. */
     if (S.txdev) data.station = S.txdev;
     else if (S.station) data.station = S.station;
-    /* CSRF-Token mitschicken. Ohne das schlagen alle fetch-Aktionen
-     * bei angemeldeten Nutzern mit "Token ungueltig" fehl. */
+    /* Send the CSRF token along. Without it all fetch actions fail
+     * with "invalid token" for logged-in users. */
     var meta = document.querySelector('meta[name="csrf"]');
     if (meta) data.csrf = meta.getAttribute("content");
     return data;
@@ -264,18 +303,18 @@
     var text = input.value;
     if (!text.trim()) return;
 
-    /* Anzurufende Station - bleibt leer fuer Rundruf (CQ). */
+    /* Station to call - stays empty for broadcast (CQ).    */
     var call = $("callto");
     var to = call ? call.value.trim().toUpperCase() : "";
 
     /*
-     * Rundruf nur aus "All". In den Stationsreitern geht es um direkte
-     * Kommunikation mit einem Partner - dort muss ein Ziel stehen.
-     * Geprueft wird das auch im Server.
+     * Broadcast only from "All". The station tabs are for direct
+     * communication with one partner - a destination must be given
+     * there. The server checks this too.
      */
     var isAll = !S.station;
     if (!isAll && (!to || to === "CQ")) {
-      flash("In diesem Reiter bitte eine Station ansprechen \u2013 Rundruf nur unter \"All\".", "warn");
+      flash("Please address a station in this tab \u2013 broadcast only under \"All\".", "warn");
       if (call) call.focus();
       return;
     }
@@ -284,7 +323,7 @@
     if (isAll) payload.bcast = "1";
 
     post(payload, function (j) {
-      if (j && j.ok === false) flash(j.error || "Senden fehlgeschlagen", "err");
+      if (j && j.ok === false) flash(j.error || "sending failed", "err");
       input.value = "";
       input.focus();
       refresh(true);
@@ -292,11 +331,11 @@
   }
 
   /*
-   * Pruef-Trager im Adminbereich - ein Ger\u00e4tetest, kein Betrieb.
+   * Test carrier in the admin area - a device test, not operation.
    *
-   * Auch ein leerer Traeger ist eine Funksendung. Darum zuerst ank\u00fcndigen,
-   * dann den Rueckz\u00e4hler zeigen und erst nach der Bestaetigung senden.
-   * Der Abbruch ist jederzeit moeglich.
+   * Even an empty carrier is a transmission. So announce first, then
+   * show the countdown and only send after confirmation. Abort is
+   * possible at any time.
    */
   var pttBusy = false;
 
@@ -304,44 +343,44 @@
     if (pttBusy) return;
     var out = $("pttstate");
 
-    /* Stufe 1: ank\u00fcndigen. Sendet noch nichts. */
+    /* Stage 1: announce. Sends nothing yet.         */
     pttBusy = true;
-    if (out) out.textContent = "Pr\u00fcfe \u2026";
+    if (out) out.textContent = "Checking \u2026";
     post({ action: "ptt", run: "0", station: S.station }, function (j) {
       if (!j || j.ok !== true) {
         if (out) out.textContent = "";
-        flash((j && j.error) || "Test abgelehnt", "err");
+        flash((j && j.error) || "test rejected", "err");
         pttBusy = false;
         return;
       }
       var wait = j.wait || 3;
-      if (out) out.textContent = j.announce || ("TX in " + wait + " Sekunden");
+      if (out) out.textContent = j.announce || ("TX in " + wait + " seconds");
 
-      /* Countdown - Abbruch bleibt moeglich. */
+      /* Countdown - abort stays possible.    */
       var left = wait;
       var tick = setInterval(function () {
         left--;
         if (left <= 0) {
           clearInterval(tick);
-          if (out) out.textContent = "Sende \u2026";
-          /* Stufe 2: erst jetzt geht etwas auf die Luft. */
+          if (out) out.textContent = "Sending \u2026";
+          /* Stage 2: only now something goes on the air. */
           post({ action: "ptt", run: "1", station: S.station }, function (k) {
             pttBusy = false;
             if (out) out.textContent = k && k.ok === true
-              ? "Test beendet." : "";
-            if (k && k.ok === false) flash(k.error || "Test fehlgeschlagen", "err");
+              ? "Test finished." : "";
+            if (k && k.ok === false) flash(k.error || "test failed", "err");
             refresh(true);
           });
         } else if (out) {
-          out.textContent = (j.announce || "TX") + " \u00b7 noch " + left + " s";
+          out.textContent = (j.announce || "TX") + " \u00b7 " + left + " s left";
         }
       }, 1000);
     });
   }
 
   function flash(msg, kind) {
-    // Zuerst im Login-Dialog zeigen, falls der offen ist - dort war die
-    // Meldung bisher unsichtbar und die Anmeldung wirkte "ohne Meldung".
+    // Show it first in the login dialog, if that is open - there the
+    // message used to be invisible and login appeared "without message".
     var dlg = $("logindlg");
     if (dlg && dlg.open) {
       var lm = $("loginmsg");
@@ -362,7 +401,7 @@
   }
 
   /* ----------------------------------------------------------------------
-     Aktualisierung
+     Update
      ---------------------------------------------------------------------- */
   function refresh(force) {
     var q = "?action=state&rows=" + S.rows + "&cols=" + S.cols +
@@ -376,20 +415,20 @@
         renderState(j);
         if (j.callerid !== undefined) S.callerid = j.callerid;
         if (j.messages && j.messages.length) {
-          /* Merken, was wir kennen - sonst haengt der Client dieselbe
-           * Meldung bei jedem Abruf erneut an. */
+          /* Remember what we know - otherwise the client appends the same
+           * message again on every poll. */
           for (var i = 0; i < j.messages.length; i++) {
             S.msgs.push(j.messages[i]);
             var ts = j.messages[i].ts || 0;
             if (ts > S.since) S.since = ts;
           }
-          /* Bestand begrenzen */
+          /* Limit the stock   */
           while (S.msgs.length > 900) S.msgs.shift();
           renderLog(j.messages);
         }
         if (j.error) flash(j.error, "warn");
       })
-      .catch(function () { /* naechster Durchlauf */ });
+      .catch(function () { /* next run            */ });
 
     if (force) {
       fetch("?action=log", { credentials: "same-origin" })
@@ -406,13 +445,13 @@
   }
 
   /* ----------------------------------------------------------------------
-     Dialog / Anmeldung
+     Dialog / login
      ---------------------------------------------------------------------- */
   function openLogin() {
     var dlg = $("logindlg");
     if (!dlg) return;
     var lm = $("loginmsg");
-    if (lm) lm.hidden = true;      // alte Meldung entfernen
+    if (lm) lm.hidden = true;      // remove old message
     if (typeof dlg.showModal === "function") dlg.showModal();
     else dlg.hidden = false;
     var u = $("loginuser");
@@ -428,14 +467,37 @@
      Start
      ---------------------------------------------------------------------- */
   function boot() {
-    /* Ansichtsschalter */
+    /* View switcher    */
     qsa("[data-goto]").forEach(function (b) {
       b.addEventListener("click", function () {
         switchView(b.getAttribute("data-goto"));
       });
     });
 
-    /* Sendeleiste */
+    /* Mailbox view (MailboxD) — tab strip and administration button */
+    qsa("[data-mbox]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        mboxPanel(b.getAttribute("data-mbox"));
+      });
+    });
+
+    var mboxForm = $("mbox-form");
+    if (mboxForm) {
+      mboxForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        sendMailboxCmd();
+      });
+    }
+
+    var mboxLogin = $("mbox-loginform");
+    if (mboxLogin) {
+      mboxLogin.addEventListener("submit", function (e) {
+        e.preventDefault();
+        mboxLoginSubmit();
+      });
+    }
+
+    /* Send bar    */
     var form = $("txform");
     if (form) {
       form.addEventListener("submit", function (e) {
@@ -443,7 +505,7 @@
         sendText();
       });
     }
-    /* Sendegeraet - nur fuer das Senden, Empfang bleibt unter "All" */
+    /* Transmitting device - only for sending, reception stays under "All" */
     var txdev = $("txdev");
     if (txdev) {
       S.txdev = txdev.value || "";
@@ -455,15 +517,15 @@
     var ptt = $("ptttest");
     if (ptt) ptt.addEventListener("click", pttTest);
 
-    /* Stationsreiter - jeder steht fuer eine eigene Hardware */
+    /* Station tabs - each stands for own hardware            */
     qsa("[data-station]").forEach(function (b) {
       b.addEventListener("click", function () {
-        /* dieselbe Markierung wie Terminal / Administration rechts */
+        /* the same marking as Terminal / Administration on the right */
         qsa("[data-station]").forEach(function (x) { x.classList.remove("is-active"); });
         b.classList.add("is-active");
         S.station = b.getAttribute("data-station") || "";
-        /* Die Geraetewahl gehoert NUR zu "All". In einem Stationsreiter
-         * gilt das Geraet des Reiters - eine Auswahl waere widerspruechlich. */
+        /* The device choice belongs ONLY to "All". In a station tab the
+         * device of that tab applies - a selection would be contradictory. */
         var dev = $("txdev");
         var devLbl = $("txdevlbl");
         if (dev) {
@@ -477,7 +539,7 @@
       });
     });
 
-    /* Kanalraster */
+    /* Channel grid */
     qsa(".ch").forEach(function (el) {
       el.addEventListener("click", function () {
         var n = el.getAttribute("data-ch");
@@ -489,16 +551,16 @@
       });
     });
 
-    /* Betriebsart / Duplex */
+    /* Mode / duplex        */
     var mode = $("selmode");
     if (mode) {
       mode.addEventListener("change", function () {
         var want = mode.value;
         post({ action: "set", mode: want }, function (j) {
           if (j && j.ok === false) {
-            flash(j.error || "Umschalten nicht moeglich", "err");
+            flash(j.error || "switching not possible", "err");
           }
-          // Zustand neu lesen - setzt den Kasten auf den echten Wert
+          // re-read state - puts the box back to the real value
           refresh(true);
         });
       });
@@ -513,19 +575,19 @@
       });
     }
 
-    /* Anmeldung */
+    /* Login     */
     var loginForm = $("loginform");
     if (loginForm) {
       loginForm.addEventListener("submit", function (e) {
         e.preventDefault();
         var uEl = $("loginuser"), pEl = $("loginpass");
         if (!uEl || !pEl) {
-          flash("Formular unvollständig - bitte neu laden", "err");
+          flash("form incomplete - please reload", "err");
           return;
         }
         var u = uEl.value, p = pEl.value;
         if (!u || !p) {
-          flash("Benutzer und Passwort eingeben", "warn");
+          flash("enter user and password", "warn");
           return;
         }
         post({ action: "login", user: u, pass: p }, function (j) {
@@ -533,7 +595,7 @@
             closeLogin();
             location.reload();
           } else {
-            flash((j && j.error) || "Anmeldung fehlgeschlagen", "err");
+            flash((j && j.error) || "login failed", "err");
           }
         });
       });
@@ -548,13 +610,13 @@
       b.addEventListener("click", closeLogin);
     });
 
-    /* Tastatur */
+    /* Keyboard */
     document.addEventListener("keydown", function (e) {
       if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
       if (e.key === "/") { e.preventDefault(); var t = $("txtext"); if (t) t.focus(); }
     });
 
-    /* Raster bei Groessenaenderung neu ausrechnen */
+    /* Recompute the grid on resize                */
     var term = $("term");
     if (term && typeof ResizeObserver !== "undefined") {
       new ResizeObserver(function () {

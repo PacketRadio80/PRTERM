@@ -1,27 +1,27 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * tnc2.c - Treiber fuer TNC2-Klasse (Landolt TNC2C, PK-TNC2).
+ * tnc2.c - Driver for TNC2 class (Landolt TNC2C, PK-TNC2).
  *
- * Protokoll: KISS ueber serielle Leitung.
+ * Protocol: KISS over a serial line.
  *
- * Betriebserfahrungen, die diesen Treiber bestimmen:
+ * Field experience that shapes this driver:
  *
- *   - DEN PORT NICHT SCHLIESSEN, solange das Geraet im Command-Mode ist.
- *     Ein fallendes DTR versetzt einen TNC2C in einen Echo-only-Zustand.
- *     Im KISS-Betrieb ist das unkritisch - der normale Betriebszustand.
+ *   - DO NOT CLOSE THE PORT while the device is in command mode.
+ *     A falling DTR puts a TNC2C into an echo-only state. In KISS
+ *     operation this is uncritical - the normal operating state.
  *
- *   - C0 FF C0 setzt bei TheFirmware die Firmware zurueck und laesst den
- *     Banner erscheinen. Es ist NICHT nur "KISS verlassen".
+ *   - C0 FF C0 resets the firmware on TheFirmware and makes the
+ *     banner appear. It is NOT just "leave KISS".
  *
- *   - ESC V (1B 56 0D) ist der Probe, nicht INFO oder HELP.
+ *   - ESC V (1B 56 0D) is the probe, not INFO or HELP.
  *
- *   - ESC I <call>\r setzt MYCALL (tfb.c Icmd).
+ *   - ESC I <call>\r sets MYCALL (tfb.c Icmd).
  *
- *   - ESC @K (1B 40 4B) schaltet in den KISS-Modus, OHNE Zeilenende.
+ *   - ESC @K (1B 40 4B) switches to KISS mode WITHOUT line end.
  *
- *   - Im KISS-Modus spricht das Geraet nur Rahmen, keine Kommandos.
+ *   - In KISS mode the device speaks frames only, no commands.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -41,7 +41,7 @@
 #define TNC2_MAX_PENDING 32
 
 typedef struct tnc2_impl {
-    pr_tncsock   sock;   /* zum Daemon, der den Port offen haelt */
+    pr_tncsock   sock;   /* to the daemon that keeps the port open */
     pr_rig_state st;
     kiss_decoder dec;
 
@@ -50,19 +50,19 @@ typedef struct tnc2_impl {
 
     bool         in_kiss;
     char         mycall[16];
-    /* Monitortext: der Daemon liefert Zeilen, keine KISS-Rahmen */
+    /* Monitor text: the daemon delivers lines, no KISS frames   */
     char         line[512];
     size_t       line_len;
     /*
-     * Name der Station, zu der dieses Geraet gehoert. Beim Oeffnen aus
-     * der Konfiguration uebernommen, damit jede empfangene Nachricht ihr
-     * Geraet benennen kann - das zeigt die Ansicht "All".
+     * Name of the station this device belongs to. Taken from the
+     * configuration at open time, so every received message can name
+     * its device - the "All" view shows that.
      */
     char         station[32];
 } tnc2_impl;
 
 /* ======================================================================= */
-/* Zustand sichern                                                         */
+/* Save state                                                              */
 /* ======================================================================= */
 
 static void tnc2_note(pr_rig *r, char kind, const char *from, const char *text)
@@ -84,18 +84,18 @@ static void tnc2_save(pr_rig *r, tnc2_impl *t)
 }
 
 /* ======================================================================= */
-/* Aufnehmen einer empfangenen Nachricht                                   */
+/* Capturing a received message                                            */
 /* ======================================================================= */
 
 
 /*
- * Eine Monitorzeile auswerten. Format der TNC2-Klasse:
+ * Evaluate a monitor line. Format of the TNC2 class:
  *
  *     FROM>TO:text
  *
- * Zeilen ohne diese Form sind Bedienhinweise des TNC und werden
- * verworfen. Bewusst tolerant: lieber eine Zeile weniger als eine
- * falsch zugeordnete.
+ * Lines without this shape are operating hints of the TNC and are
+ * discarded. Deliberately tolerant: better one line too few than one
+ * wrongly assigned.
  */
 static void tnc2_handle_monitor(tnc2_impl *t, char *line)
 {
@@ -134,7 +134,7 @@ static void tnc2_handle_monitor(tnc2_impl *t, char *line)
 }
 
 
-/* tnc2_handle_frame entfaellt: im Kommandomodus kommt Monitortext. */
+/* tnc2_handle_frame is dropped: command mode delivers monitor text. */
 
 
 /* ======================================================================= */
@@ -147,21 +147,21 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
 
     int databits = 8, parity = PR_PAR_NONE, stopbits = 1;
     if (!pr_serial_parse_line(cfg->serial_line, &databits, &parity, &stopbits)) {
-        snprintf(err, errlen, "Zeilenformat \"%s\" ist ungueltig (z.B. 8n1)",
+        snprintf(err, errlen, "line format \"%s\" is invalid (e.g. 8n1)",
                  cfg->serial_line);
         return -1;
     }
 
     tnc2_impl *t = calloc(1, sizeof *t);
     if (t == NULL) {
-        snprintf(err, errlen, "Speicher erschoepft");
+        snprintf(err, errlen, "out of memory");
         return -1;
     }
 
     /*
-     * Der Port wird NICHT hier geoeffnet. Das uebernimmt prterm-tncd,
-     * der ihn offen haelt und KISS fuehrt. Ein CGI, das den Port selbst
-     * oeffnet, reisst den TNC2C bei jedem Aufruf aus KISS.
+     * The port is NOT opened here. prterm-tncd does that, keeping it
+     * open and running KISS. A CGI that opens the port itself tears
+     * the TNC2C out of KISS on every call.
      */
     {
         char sock[512];
@@ -178,19 +178,19 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
     kiss_decoder_init(&t->dec);
 
     /*
-     * BEWUSST KEINE Befehle ans Geraet.
+     * DELIBERATELY NO commands to the device.
      *
-     * Ein CGI oeffnet den Port bei JEDEM Aufruf - der Zustandsabruf
-     * laeuft sekuendlich. Frueher wurde dabei jedes Mal die
-     * KISS-Einfahrt geschrieben. Steht das TNC aber schon im KISS-Modus,
-     * ist jedes geschriebene Byte EINE SENDUNG. Das hat zu einem
-     * Dauertransmitter gefuehrt.
+     * A CGI opens the port on EVERY call - the state poll runs
+     * every second. Formerly the KISS entry was written every
+     * single time. But if the TNC is already in KISS mode, every
+     * written byte is A TRANSMISSION. That led to a permanent
+     * transmitter.
      *
-     * Das Oeffnen eines Geraets darf dessen Zustand nicht veraendern.
-     * In den KISS-Modus fuehrt nur --checkup / --reset-tnc, und zwar
-     * bewusst nach dem Grundsatz: zuerst KISS verlassen (Kontrollrahmen,
-     * sendet nichts), dann im Kommandomodus schreiben, dann KISS
-     * betreten.
+     * Opening a device must not change its state. Only --checkup /
+     * --reset-tnc lead into KISS mode, deliberately following the
+     * principle: leave KISS first (control frame, sends nothing),
+     * then write in command mode, then enter KISS. The order is
+     * deliberate.
      */
 
     if (pr_state_load(cfg, &t->st, err, errlen) != 0) {
@@ -210,9 +210,9 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
     r->impl = t;
 
     /*
-     * Nur beim ALLERERSTEN Start melden. Der Port wird bei jedem
-     * CGI-Aufruf neu geoeffnet - eine Meldung pro Aufruf wuerde das
-     * Terminal fluten. Es ist Rauschen, kein Status.
+     * Report only on the VERY FIRST start. The port is reopened on
+     * every CGI call - one message per call would flood the terminal.
+     * It is noise, not status.
      */
     {
         char state_file[640];
@@ -231,8 +231,8 @@ static void tnc2_close(pr_rig *r)
 
     tnc2_save(r, t);
     /*
-     * Der Port wird geschlossen - erst im KISS-Betrieb ist das unkritisch.
-     * Im Command-Mode wuerde das DTR den Echo-only-Zustand ausloesen.
+     * The port is being closed - only in KISS operation is this
+     * uncritical. In command mode the DTR would trigger echo-only.
      */
     pr_tncsock_close(&t->sock);
     free(t);
@@ -243,17 +243,17 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
 
-    /* Halbduplex: waehrend ptt=1 wird nicht empfangen */
+    /* Half duplex: nothing is received while ptt=1    */
     t->st.rx_muted = (t->st.duplex == PR_DUPLEX_HALF) && t->st.ptt;
 
     if (t->st.rx_muted)
         return 0;
 
-    /* Empfangene Rahmen abholen */
+    /* Fetch received frames     */
     unsigned char buf[2048];
     long n = pr_tncsock_rx(&t->sock, buf, sizeof buf, err, errlen);
     if (n < 0)
@@ -261,11 +261,11 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
 
     if (n > 0) {
         /*
-         * Der Daemon steht dauerhaft im Kommandomodus - empfangen
-         * geschieht ueber den Monitortext, nicht ueber KISS-Rahmen.
-         * Format der TNC2-Klasse:
+         * The daemon stays in command mode permanently - reception
+         * happens via monitor text, not via KISS frames. Format of
+         * the TNC2 class:
          *     FROM>TO:text
-         * Alles andere (Prompts, Meldungen) wird verworfen.
+         * Anything else (prompts, messages) is discarded.
          */
         for (long i = 0; i < n; i++) {
             char c = (char)buf[i];
@@ -298,7 +298,7 @@ static int tnc2_set_freq(pr_rig *r, long freq_hz, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -311,7 +311,7 @@ static int tnc2_set_mode(pr_rig *r, unsigned mode, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -324,19 +324,19 @@ static int tnc2_set_ptt(pr_rig *r, bool on, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
 
     if (on && t->st.monitor) {
-        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        snprintf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     (void)errlen;
 
     /*
-     * PTT wird bei KISS von der Hardware gefuehrt - beim Senden eines
-     * Rahmens schaltet das TNC selbst. Hier merken wir nur den Zustand.
+     * With KISS, PTT is handled by the hardware - the TNC switches
+     * itself when sending a frame. Here we only note the state.
      */
     t->st.ptt = on;
     t->st.rx_muted = (t->st.duplex == PR_DUPLEX_HALF) && on;
@@ -348,7 +348,7 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -357,14 +357,14 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
     t->st.rx_muted = (d == PR_DUPLEX_HALF) && t->st.ptt;
 
     /*
-     * KISS-Parameter FULLDUPLEX (0x05) an das Geraet melden.
-     * Das ist der Hebel, ueber den die Hardware Vollduplex kann.
+     * Report the KISS parameter FULLDUPLEX (0x05) to the device.
+     * That is the lever via which the hardware can do full duplex.
      */
     unsigned char frame[8];
     size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX,
                            NULL, 0);
     if (n == 0) {
-        /* Wert muss als Payload uebermittelt werden */
+        /* The value must be sent as payload         */
         unsigned char v = (d == PR_DUPLEX_FULL) ? 1 : 0;
         n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
     }
@@ -381,7 +381,7 @@ static int tnc2_set_monitor(pr_rig *r, bool on, char *err, size_t errlen)
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     (void)errlen;
@@ -400,21 +400,21 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     if (t->st.monitor) {
-        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        snprintf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
     if (text == NULL || text[0] == '\0') {
-        snprintf(err, errlen, "leere Nachricht");
+        snprintf(err, errlen, "empty message");
         return -1;
     }
 
     /*
-     * AX.25-UI-Rahmen bauen. "to" ist die anzurufende Station; leer oder
-     * CQ steht fuer einen Rundruf ohne festen Partner.
+     * Build an AX.25 UI frame. "to" is the station to call; empty or
+     * CQ stands for a broadcast without a fixed partner.
      */
     if (to == NULL || to[0] == '\0')
         to = "CQ";
@@ -423,16 +423,16 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
     size_t uilen = ax25_ui_frame(ui, sizeof ui, from, to,
                                  (const unsigned char *)text, strlen(text));
     if (uilen == 0) {
-        snprintf(err, errlen, "Rahmen konnte nicht gebaut werden");
+        snprintf(err, errlen, "frame could not be built");
         return -1;
     }
 
-    /* KISS-Rahmen: FEND | 0x00 | escaped Payload | FEND
-     * Der FCS wird NICHT mitgeliefert - den berechnet und ergaenzt das TNC. */
+    /* KISS frame: FEND | 0x00 | escaped payload | FEND
+     * The FCS is NOT included - the TNC computes and adds it. */
     unsigned char frame[640];
     size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA, ui, uilen);
     if (flen == 0) {
-        snprintf(err, errlen, "KISS-Rahmen zu gross");
+        snprintf(err, errlen, "KISS frame too large");
         return -1;
     }
 
@@ -447,31 +447,31 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
 }
 
 /*
- * Pruef-Trager fuer den Adminbereich.
+ * Test carrier for the admin area.
  *
- * Bei KISS schaltet die Hardware die Sendung beim Rahmen selbst - es
- * gibt keinen Befehl fuer "nur Traeger ohne Inhalt". Die Testdauer wird
- * daher ueber die RAHMENLAENGE abgebildet: der Nutzdatenanteil wird so
- * bemessen, dass die Uebertragung ungefaehr die gewuenschte Zeit
- * dauert. Inhalt ist Null-Padding, also ohne jede Bedeutung.
+ * With KISS the hardware switches the transmission with the frame
+ * itself - there is no command for "carrier only without content".
+ * The test duration is therefore mapped via the FRAME LENGTH: the
+ * payload part is sized so that the transmission takes roughly the
+ * desired time. The content is null padding, so meaningless.
  *
- * Das ist ehrlicher als ein "PTT an", das bei KISS nur eine Variable
- * setzt und nichts auf die Luft gibt.
+ * This is more honest than a "PTT on", which with KISS only sets a
+ * variable and puts nothing on the air.
  */
 /*
- * Pruef-Trager fuer den Adminbereich.
+ * Test carrier for the admin area.
  *
- * Bei KISS schaltet die Hardware die Sendung beim Rahmen selbst - es
- * gibt keinen Befehl fuer "nur Traeger ohne Inhalt". Die Dauer wird
- * ueber die Rahmenanzahl abgebildet.
+ * With KISS the hardware switches the transmission with the frame
+ * itself - there is no command for "carrier only without content".
+ * The duration is mapped via the number of frames.
  *
- * WICHTIG: jeder Rahmen bleibt in der fuer AX.25 ueblichen Groesse
- * (PACLEN, hier 256 Byte Nutzdaten). Ein einzelner, aufgeblasener
- * Rahmen wird vom TNC abgelehnt oder bleibt im Speicher liegen - die
- * LED "unbestaetigte Daten" leuchtet dann dauerhaft, obwohl nichts zu
- * bestaetigen ist. Genau das ist hier passiert.
+ * IMPORTANT: every frame stays at the size usual for AX.25 (PACLEN,
+ * here 256 bytes of payload). A single inflated frame is rejected by
+ * the TNC or stays stuck in memory - the "unacknowledged data" LED
+ * then stays on although there is nothing to acknowledge. Exactly
+ * that happened here.
  *
- * Der Inhalt ist Null-Padding, also ohne jede Bedeutung.
+ * The content is null padding, so meaningless.
  */
 #define TNC2_PACLEN 256
 
@@ -480,27 +480,27 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
 {
     tnc2_impl *t = r->impl;
     if (t == NULL) {
-        snprintf(err, errlen, "TNC nicht verbunden");
+        snprintf(err, errlen, "TNC not connected");
         return -1;
     }
     if (seconds == 0 || seconds > 10) {
-        snprintf(err, errlen, "Dauer muss zwischen 1 und 10 Sekunden liegen");
+        snprintf(err, errlen, "duration must be between 1 and 10 seconds");
         return -1;
     }
     if (t->st.monitor) {
-        snprintf(err, errlen, "Monitorbetrieb: Senden ist gesperrt");
+        snprintf(err, errlen, "monitor mode: transmitting is locked");
         return -1;
     }
 
     /*
-     * Wie viele Rahmen brauchen wir? Jeder Rahmen bindet die Sendung
-     * fuer seine Uebertragungsdauer. Die Reihenfolge wird bewusst so
-     * gewaehlt, dass das PTT nicht dazwischen faellt.
+     * How many frames do we need? Each frame holds the transmission
+     * for its duration. The order is deliberately chosen so that PTT
+     * does not drop in between.
      */
     long baud = r->cfg->radio_baud > 0 ? r->cfg->radio_baud : 1200;
     long bits_needed = (long)seconds * baud;
     long bytes_needed = bits_needed / 8;
-    /* abzueglich AX.25-Kopf (16) und FCS (2) je Rahmen */
+    /* minus AX.25 header (16) and FCS (2) per frame    */
     long per_frame = TNC2_PACLEN + 18;
     long frames = (bytes_needed + per_frame - 1) / per_frame;
     if (frames < 1) frames = 1;
@@ -514,7 +514,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         size_t uilen = ax25_ui_frame(ui, sizeof ui, r->cfg->callerid, "CQ",
                                      pad, TNC2_PACLEN);
         if (uilen == 0) {
-            snprintf(err, errlen, "Pruefrahmen konnte nicht gebaut werden");
+            snprintf(err, errlen, "test frame could not be built");
             return -1;
         }
 
@@ -522,7 +522,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA,
                                   ui, uilen);
         if (flen == 0) {
-            snprintf(err, errlen, "KISS-Rahmen zu gross");
+            snprintf(err, errlen, "KISS frame too large");
             return -1;
         }
 
@@ -534,14 +534,14 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
     }
 
     /*
-     * Bei KISS ist die Sendung mit dem letzten Rahmen abgeschlossen -
-     * das TNC schaltet selbst und laesst wieder los.
+     * With KISS the transmission ends with the last frame - the TNC
+     * switches itself and lets go again.
      */
     t->st.ptt = false;
     t->st.rx_muted = false;
 
     tnc2_note(r, PR_MSG_TX, r->cfg->callerid,
-              "[Pruef-Trager ohne Inhalt]");
+              "[empty test carrier]");
     t->st.tx_count++;
     t->st.last_tx_ts = pr_now_s();
     tnc2_save(r, t);
@@ -568,7 +568,7 @@ static int tnc2_drain(pr_rig *r, pr_msg *out, size_t cap, size_t *n)
 
 const pr_rig_vtbl pr_rig_tnc2 = {
     "tnc2",
-    "TNC2-Klasse (Landolt TNC2C, PK-TNC2) ueber KISS",
+    "TNC2 class (Landolt TNC2C, PK-TNC2) via KISS",
     tnc2_open,
     tnc2_close,
     tnc2_refresh,

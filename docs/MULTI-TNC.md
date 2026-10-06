@@ -1,58 +1,58 @@
-# PRTERM — Mehrere Stationen
+# PRTERM — Multiple Stations
 
-> **Vorgabe:** *„Es müssen mehrere gleichzeitig funktionieren auf dem
-> selben Kanal.“*
+> **Requirement:** *"Several must work simultaneously on the
+> same channel."*
 >
-> **Klärung:** *„Beide haben ein eigenes Funkgerät und eigene Antenne.“*
+> **Clarification:** *"Both have their own rig and their own antenna."*
 
 ---
 
-## 1. Das Modell
+## 1. The model
 
-Es sind **keine** zwei TNCs an einem Funkgerät, sondern **zwei
-vollständige Stationen**:
+This is **not** two TNCs on one rig, but **two
+complete stations**:
 
 ```
-Station A:  TNC2C   ──►  Funkgerät A  ──►  Antenne A
-Station B:  PK-TNC2 ──►  Funkgerät B  ──►  Antenne B
+Station A:  TNC2C   ──►  Rig A  ──►  Antenna A
+Station B:  PK-TNC2 ──►  Rig B  ──►  Antenna B
                                 │
-                          beide auf Kanal 24 (27.235 MHz)
+                          both on channel 24 (27.235 MHz)
 ```
 
-Jede Station ist **in sich geschlossen**: eigener TNC, eigenes Funkgerät,
-eigene Antenne, eigener serieller Anschluss, eigene Identität.
+Each station is **self-contained**: its own TNC, its own rig,
+its own antenna, its own serial port, its own identity.
 
 ---
 
-## 2. Warum verschiedene Funk-Baudraten kein Problem sind
+## 2. Why different radio baud rates are no problem
 
-| Station  | Funk-Baudrate | Vermögen |
-| -------- | ------------- | ------- |
-| TNC2C    | **2400**      | fest verdrahtet (Modem TCM3105) |
-| PK-TNC2  | **1200**      | fest verdrahtet |
+| Station  | Radio baud rate | Capability |
+| -------- | --------------- | ---------- |
+| TNC2C    | **2400**        | hard-wired (modem TCM3105) |
+| PK-TNC2  | **1200**        | hard-wired |
 
-> *„Die weder aufwärts noch abwärts schalten können.“*
+> *"Which can be switched neither up nor down."*
 
-Die Funk-Baudrate ist **Hardware**, keine Einstellung. PRTERM darf sie
-kennen, dokumentieren und anzeigen — aber **niemals versuchen zu ändern**.
+The radio baud rate is **hardware**, not a setting. PRTERM may
+know it, document it and display it — but **never try to change it**.
 
-Dass die beiden sich auf demselben Kanal nicht gegenseitig verstehen, ist
-damit **erwartet und gewollt**: es sind unabhängige Stationen.
+The fact that the two cannot understand each other on the same channel is
+therefore **expected and intended**: they are independent stations.
 
 ---
 
-## 3. Konfiguration
+## 3. Configuration
 
 ```ini
 [radio]
-freq_hz   = 27235000     ; Kanal 24 - gemeinsame Frequenz
+freq_hz   = 27235000     ; channel 24 - shared frequency
 mode      = fm
 
 [station:tnc2c]
 driver     = tnc2
 port       = /dev/serial/by-id/usb-FTDI_USB_Serial_Converter_FTC7OKUL-if00-port0
-baud       = 19200        ; seriell zum TNC
-radio_baud = 2400         ; FEST - Hardware, nicht aenderbar
+baud       = 19200        ; serial to the TNC
+radio_baud = 2400         ; FIXED - hardware, not changeable
 modem      = tcm3105
 line       = 8n1
 callerid   = DL1ABC-1
@@ -61,59 +61,59 @@ antenne    = Vertikal
 [station:pktn2c]
 driver     = tnc2
 port       = /dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller-if00-port0
-baud       = 9600         ; seriell zum TNC
-radio_baud = 1200         ; FEST - Hardware, nicht aenderbar
+baud       = 9600         ; serial to the TNC
+radio_baud = 1200         ; FIXED - hardware, not changeable
 line       = 8n1
 callerid   = DL1ABC-2
 antenne    = Richtantenne
 ```
 
-`radio_baud` wird bewusst **nicht** an das Gerät gesendet — es ist eine
-Eigenschaft, keine Anweisung.
+`radio_baud` is deliberately **not** sent to the rig — it is a
+property, not a command.
 
 ---
 
-## 4. Senderegelung
+## 4. Transmit arbitration
 
-Auch mit getrennten Funkgeräten gilt: **auf derselben Frequenz sendet
-immer nur eine Station.** Sonst stören sich die Signale über die Luft,
-unabhängig von der Antenne.
+Even with separate rigs the rule holds: **on the same frequency only one
+station transmits at a time.** Otherwise the signals interfere over the air,
+regardless of the antenna.
 
-Die Regelung liegt in `src/arbiter.c`:
+The arbitration lives in `src/arbiter.c`:
 
 ```
-Sendewunsch  ──►  Sperre je Frequenz  ──►  senden  ──►  freigeben
+transmit request ──► lock per frequency ──► transmit ──► release
 ```
 
-* eine Sperre **je Frequenz** — Stationen auf verschiedenen Kanälen
-  behindern sich nicht
-* über `fcntl(F_SETLK)` — wirkt auch über mehrere CGI-Prozesse
-* fällt automatisch, wenn ein Prozess endet — kein hängender Kanal
-* zeigt bei Ablehnung an, **wer** gerade sendet
+* one lock **per frequency** — stations on different channels
+  do not block each other
+* via `fcntl(F_SETLK)` — effective across multiple CGI processes
+* drops automatically when a process ends — no stuck channel
+* on rejection, shows **who** is transmitting at the time
 
-Empfang ist unkritisch: beide Stationen hören gleichzeitig und tragen in
-ein gemeinsames Log ein.
-
----
-
-## 5. Stand
-
-|                                     |                                     |
-| ----------------------------------- | ----------------------------------- |
-| Mehrere Stationen konfigurieren     | in Arbeit                           |
-| Senderegelung (Arbiter)             | **gebaut** (`src/arbiter.c`)        |
-| Gemeinsames Log                     | Grundlage vorhanden                 |
-| Eigene Identität je Station         | vorbereitet                         |
-| Anzeige beider im Webinterface      | offen                               |
-| Funk-Baudrate als Hardware-Eigenschaft | **gebaut**                      |
+Reception is uncritical: both stations listen simultaneously and write into
+one shared log.
 
 ---
 
-## 6. Warum das so und nicht anders
+## 5. Status
 
-Die beiden Stationen könnten völlig getrennte Programme sein. PRTERM
-führt sie trotzdem zusammen, weil:
+|                                          |                                     |
+| ---------------------------------------- | ----------------------------------- |
+| Configuring multiple stations            | in progress                         |
+| Transmit arbitration (arbiter)           | **built** (`src/arbiter.c`)         |
+| Shared log                               | foundation in place                 |
+| Own identity per station                 | prepared                            |
+| Showing both in the web interface        | open                                |
+| Radio baud rate as hardware property     | **built**                           |
 
-* es **einen** Ort für Empfangslog und Bedienung geben soll
-* die **Senderegelung** nur funktioniert, wenn sie alle Stationen sieht
-* die **Compliance** (Bandplan, Leistung) für alle gleich gelten muss
+---
+
+## 6. Why it is this way and no other
+
+The two stations could be completely separate programs. PRTERM
+brings them together anyway, because:
+
+* there shall be **one** place for the receive log and operation
+* the **transmit arbitration** only works if it sees all stations
+* the **compliance** (band plan, power) must apply equally to all

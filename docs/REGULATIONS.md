@@ -1,97 +1,97 @@
-# PRTERM — Regeln & Bestimmungen
+# PRTERM — Rules & Regulations
 
-> **Grundsatz:** PRTERM hält sich vollständig an die Amateurfunk- und
-> CB-Funk-Bestimmungen sowie an die allgemeinen Vorgaben und Techniken.
-> Die **Lösungen** sind unsere eigenen — die **Vorgaben** sind einzuhalten.
+> **Principle:** PRTERM complies fully with the amateur radio and
+> CB radio regulations as well as with the general requirements and techniques.
+> The **solutions** are our own — the **requirements** must be observed.
 
-Die Compliance-Schicht liegt **vor** dem Sendepfad. Was sie ablehnt, geht
-nicht auf die Luft, auch nicht als KISS-`DATA`-Frame.
+The compliance layer sits **in front of** the transmit path. What it rejects
+does not go on the air, not even as a KISS-`DATA`-frame.
 
 ---
 
-## 1. Was PRTERM durchsetzt
+## 1. What PRTERM enforces
 
-| Ebene                     | Regel                                                       |
+| Level                     | Rule                                                        |
 | ------------------------- | ----------------------------------------------------------- |
-| **Frequenz**              | Senden nur innerhalb zugeteilter Bereiche                   |
-| **Kanalraster**           | Rastertreue wo vorgeschrieben (CB: 40 Kanäle)               |
-| **Leistung**              | maximale Sendeleistung je Band                              |
-| **Bandbreite/Modus**      | nur im Band erlaubte Betriebsarten                          |
-| **Identifikation**        | gültiges Rufzeichen, `CALLID`/`CALLERID`-Regel 6+2          |
-| **Betriebsart**           | Halbduplex-Zwang auf Bändern ohne Vollduplex-Zuteilung      |
+| **Frequency**             | transmit only within allocated ranges                       |
+| **Channel raster**        | raster adherence where prescribed (CB: 40 channels)         |
+| **Power**                 | maximum transmit power per band                             |
+| **Bandwidth/mode**        | only operating modes permitted in the band                  |
+| **Identification**        | valid call sign, `CALLID`/`CALLERID` rule 6+2               |
+| **Operating mode**        | half-duplex constraint on bands without full-duplex allocation |
 
 ---
 
-## 2. CB-Funk (Beispiel: CEPT / Deutschland)
+## 2. CB radio (example: CEPT / Germany)
 
 ```
-Bereich   : 26.965 MHz ... 27.405 MHz
-Kanalraster: 10 kHz  ->  40 Kanäle
-Modi      : FM (und AM wo zugelassen)
-Leistung  : 4 W FM / 1 W AM  (CEPT; landesspezifisch prüfen!)
-Identifikation: wie vorgeschrieben, keine Fremdidentifikation
+Range     : 26.965 MHz ... 27.405 MHz
+Channel raster: 10 kHz  ->  40 channels
+Modes     : FM (and AM where permitted)
+Power     : 4 W FM / 1 W AM  (CEPT; check national rules!)
+Identification: as prescribed, no foreign identification
 ```
 
-> **Wichtig:** CB ist ein **genehmigungsfreier** Dienst mit strikten
-> technischen Bedingungen (Typenzulassung, Bauartzulassung). PRTERM ersetzt
-> **keine** Bauartzulassung und darf nicht dazu benutzt werden, zugelassene
-> Geräte außerhalb ihrer Zulassung zu betreiben. PRTERM ist eine
-> **Bedien-/Terminalsoftware**.
+> **Important:** CB is a **licence-exempt** service with strict
+> technical conditions (homologation, type approval). PRTERM replaces
+> **no** type approval and must not be used to operate approved
+> rigs outside their approval. PRTERM is
+> **operating/terminal software**.
 
-## 3. Amateurfunk
+## 3. Amateur radio
 
 ```
-Zuteilung   : landesspezifische Bänder (z.B. 160m..70cm)
-Lizenz      : gültiges Rufzeichen erforderlich
-Identifikation: Rufzeichen am Anfang/Ende der Aussendung, wie vorgeschrieben
-Leistung    : lizenz-/bandabhängig
-Modi        : wie im Bandplan vorgesehen
+Allocation  : national bands (e.g. 160m..70cm)
+Licence     : valid call sign required
+Identification: call sign at the beginning/end of the transmission, as prescribed
+Power       : licence-/band-dependent
+Modes       : as provided for in the band plan
 ```
 
-Amateurfunk ist **lizenzpflichtig**. PRTERM setzt keine Lizenz durch und
-prüft keine Berechtigung — das ist Sache des Bedieners.
+Amateur radio is **subject to licensing**. PRTERM does not enforce a licence and
+checks no authorization — that is the operator's responsibility.
 
-## 4. Technische Vorgaben
+## 4. Technical requirements
 
-| Thema              | Vorgabe                                                      |
+| Topic              | Requirement                                                  |
 | ------------------ | ------------------------------------------------------------ |
-| **AX.25**          | Adressierung 6+1 Byte shifted ASCII, SSID `0..15`, PID `0xF0` |
-| **HDLC**           | FCS CRC-16, reflektiert `0x8408`, Init `0xFFFF`, XOR `0xFFFF` |
-| **KISS**           | `FEND/FESC/TFEND/TFESC` = `C0/DB/DC/DD`                       |
-| **CSMA**           | `TXDELAY`, `SLOTTIME`, `PERSIST` — CB: `PERSIST=255`          |
-| **TX-Pacing**      | min. 1,5 s zwischen Sendungen                                |
-| **Halbduplex**     | Trägersperre beachten, `SLOTTIME*10 ms` nach RX               |
+| **AX.25**          | addressing 6+1 byte shifted ASCII, SSID `0..15`, PID `0xF0` |
+| **HDLC**           | FCS CRC-16, reflected `0x8408`, init `0xFFFF`, XOR `0xFFFF` |
+| **KISS**           | `FEND/FESC/TFEND/TFESC` = `C0/DB/DC/DD`                      |
+| **CSMA**           | `TXDELAY`, `SLOTTIME`, `PERSIST` — CB: `PERSIST=255`         |
+| **TX pacing**      | min. 1.5 s between transmissions                             |
+| **Half duplex**    | respect carrier lockout, `SLOTTIME*10 ms` after RX           |
 
-## 5. Wo PRTERM bewusst eigene Wege geht
+## 5. Where PRTERM deliberately goes its own ways
 
-Das *Wie* ist unsere Lösung, solange das *Was* eingehalten wird:
+The *how* is our solution, as long as the *what* is observed:
 
-- **CGI statt WebSocket**: "keine Installation" hat Vorrang.
-- **INI-only**: eine Datei, kein Framework, kein Daemon-Zwang.
-- **Vollduplex als Betriebsmodell**: RX/TX-Entkopplung im Terminal.
-  Die *rechtliche* Prüfung bleibt unberührt und kann Senden verhindern.
-- **CALLERID 6+2**: strenger als AX.25 (`-0..-15`), weil es die Vorgabe ist.
-- **Eigene Architektur**: das Studienmaterial liefert nur das Verbindliche
-  (Protokolle, AX.25, Gerätenamen, Sicherheitsparameter).
+- **CGI instead of WebSocket**: "no installation" takes priority.
+- **INI-only**: one file, no framework, no forced daemon.
+- **Full duplex as operating model**: RX/TX decoupling in the terminal.
+  The *legal* check remains untouched and can prevent transmitting.
+- **CALLERID 6+2**: stricter than AX.25 (`-0..-15`), because it is the requirement.
+- **Own architecture**: the study material only provides what is binding
+  (protocols, AX.25, device names, security parameters).
 
-## 6. Grenzwerte (bewährt)
+## 6. Limits (proven)
 
 ```
-On-Air-Nachricht     max. 48 Byte
-Sendepause           min. 1,5 s
-Auto-Beacon-Abstand  min. 900 s
-Band muss frei sein  min. 180 s
-Ban-Liste            begrenzt (256)
+On-air message       max. 48 byte
+Transmit gap         min. 1.5 s
+Auto-beacon interval min. 900 s
+Band must be free    min. 180 s
+Ban list             limited (256)
 ```
 
-## 7. Offene Punkte
+## 7. Open items
 
-Die konkreten Landesvorgaben sind **länderspezifisch** und werden als
-konfigurierbare Bandtabellen in `[bands]` abgebildet, mit sinnvollen
-Defaults. Wer PRTERM außerhalb der Defaults betreibt, ist für die
-Einhaltung der lokalen Vorgaben verantwortlich.
+The concrete national requirements are **country-specific** and are mapped as
+configurable band tables in `[bands]`, with sensible
+defaults. Whoever runs PRTERM outside the defaults is responsible for
+compliance with the local requirements.
 
-- [ ] Bandtabellen je Land / Region
-- [ ] Kanalraster-Validierung für CB
-- [ ] Leistungsgrenzen je Band
-- [ ] Identifikations-Pflicht (zwingende Rufzeichen-Aussendung)
+- [ ] band tables per country / region
+- [ ] channel raster validation for CB
+- [ ] power limits per band
+- [ ] mandatory identification (transmitting the call sign)

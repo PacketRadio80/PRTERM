@@ -1,7 +1,7 @@
 /*
- * PRTERM - Test: CGI und Escaping
+ * PRTERM - Test: CGI and escaping
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 

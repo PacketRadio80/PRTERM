@@ -1,11 +1,11 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * cgi.h - Request/Response nach RFC 3875 (Common Gateway Interface).
+ * cgi.h - Request/response per RFC 3875 (Common Gateway Interface).
  *
- * PRTERM hat genau eine URL. Alles Unterscheidbare laeuft ueber Query-
- * Parameter und Formularfelder derselben Adresse - siehe docs/ROUTING.md.
+ * PRTERM has exactly one URL. Everything distinguishable runs via query
+ * parameters and form fields of the same address - see docs/ROUTING.md.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PRTERM_CGI_H
 #define PRTERM_CGI_H
@@ -47,7 +47,7 @@ void pr_request_free(pr_request *req);
 
 const char *pr_req_get(const pr_request *req, const char *key);
 const char *pr_req_post(const pr_request *req, const char *key);
-/* POST zuerst, dann GET - fuer Aktionen die beides akzeptieren. */
+/* POST first, then GET - for actions that accept both.          */
 const char *pr_req_param(const pr_request *req, const char *key);
 bool pr_req_cookie(const pr_request *req, const char *name,
                    char *dst, size_t dstlen);
@@ -56,7 +56,7 @@ bool pr_req_cookie(const pr_request *req, const char *name,
 typedef struct pr_response {
     int    status;
     char   content_type[64];
-    pr_buf headers;      /* zus. Header, je \n */
+    pr_buf headers;      /* extra headers, \n-separated */
     pr_buf body;
     bool   head_only;
     bool   emitted;
@@ -73,7 +73,7 @@ void pr_response_set_cookie(pr_response *r, const char *name, const char *value,
                             int max_age_seconds, bool httponly);
 void pr_response_clear_cookie(pr_response *r, const char *name);
 
-/* Setzt Status + Content-Type */
+/* Sets status + Content-Type  */
 void pr_response_html(pr_response *r, int status);
 void pr_response_json(pr_response *r, int status);
 void pr_response_text(pr_response *r, int status);
@@ -81,7 +81,7 @@ void pr_response_binary(pr_response *r, int status, const char *mime);
 
 void pr_response_emit(const pr_response *r);
 
-/* ---- Umgebung --------------------------------------------------------- */
+/* ---- Environment ------------------------------------------------------------ */
 bool pr_is_cgi(void);
 const char *pr_cgi_env(const char *name, const char *dflt);
 

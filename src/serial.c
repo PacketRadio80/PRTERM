@@ -1,8 +1,8 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * serial.c - portable serielle Schnittstelle (POSIX.1-2008).
+ * serial.c - portable serial interface (POSIX.1-2008).
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -22,13 +22,13 @@
 #endif
 
 /* ======================================================================= */
-/* Baudrate                                                                */
+/* Baud rate                                                                */
 /* ======================================================================= */
 
 /*
- * Ueber B*-Konstanten statt cfsetspeed(): das ist die POSIX-Variante.
- * Seltenere Raten sind zusaetzlich hinter #ifdef, weil sie nicht ueberall
- * deklariert sind.
+ * Via B* constants instead of cfsetspeed(): that is the POSIX way.
+ * Rarer rates are additionally behind #ifdef because they are not
+ * declared everywhere.
  */
 static int baud_to_flag(long baud, speed_t *out)
 {
@@ -69,7 +69,7 @@ static int baud_to_flag(long baud, speed_t *out)
 }
 
 /* ======================================================================= */
-/* Aufmachen                                                               */
+/* Opening                                                                 */
 /* ======================================================================= */
 
 int pr_serial_open(pr_serial *s, const char *dev,
@@ -80,7 +80,7 @@ int pr_serial_open(pr_serial *s, const char *dev,
     s->fd = -1;
 
     if (dev == NULL || dev[0] == '\0') {
-        snprintf(err, errlen, "kein Geraet angegeben");
+        snprintf(err, errlen, "no device given");
         return -1;
     }
     pr_strlcpy(s->dev, dev, sizeof s->dev);
@@ -92,58 +92,58 @@ int pr_serial_open(pr_serial *s, const char *dev,
 
     speed_t sp;
     if (baud_to_flag(baud, &sp) != 0) {
-        snprintf(err, errlen, "Baudrate %ld wird nicht unterstuetzt", baud);
+        snprintf(err, errlen, "baud rate %ld is not supported", baud);
         return -1;
     }
     if (databits != 7 && databits != 8) {
-        snprintf(err, errlen, "Datenbits muss 7 oder 8 sein");
+        snprintf(err, errlen, "data bits must be 7 or 8");
         return -1;
     }
     if (stopbits != 1 && stopbits != 2) {
-        snprintf(err, errlen, "Stopbits muss 1 oder 2 sein");
+        snprintf(err, errlen, "stop bits must be 1 or 2");
         return -1;
     }
 
     /*
-     * O_NOCTTY  - der Port darf kein Terminal fuer diesen Prozess werden
-     * O_NONBLOCK - Zugriffe laufen ueber poll() mit Zeitlimit
+     * O_NOCTTY  - the port must not become a terminal for this process
+     * O_NONBLOCK - access goes through poll() with a timeout
      */
     int fd = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
-        snprintf(err, errlen, "kann %s nicht oeffnen: %s", dev, strerror(errno));
+        snprintf(err, errlen, "cannot open %s: %s", dev, strerror(errno));
         return -1;
     }
 
     struct termios t;
     if (tcgetattr(fd, &t) != 0) {
-        snprintf(err, errlen, "tcgetattr auf %s fehlgeschlagen: %s",
+        snprintf(err, errlen, "tcgetattr on %s failed: %s",
                  dev, strerror(errno));
         close(fd);
         return -1;
     }
 
     /*
-     * Rohmodus. cfmakeraw() ist BSD/GNU und nicht POSIX - die Felder
-     * werden deshalb von Hand gesetzt. Identisch auf Linux und FreeBSD.
+     * Raw mode. cfmakeraw() is BSD/GNU and not POSIX - the fields are
+     * set by hand instead. Identical on Linux and FreeBSD.
      */
     t.c_iflag &= ~(unsigned)(IGNBRK | BRKINT | PARMRK | ISTRIP |
                              INLCR  | IGNCR  | ICRNL   | IXON);
     t.c_oflag &= ~(unsigned)OPOST;
     t.c_lflag &= ~(unsigned)(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
 
-    /* Zeilenformat */
+    /* Line format  */
     t.c_cflag &= ~(unsigned)(CSIZE | PARENB | PARODD | CSTOPB);
 
     /*
-     * HUPCL AUS: der Port darf beim Schliessen DTR NICHT fallen lassen.
+     * HUPCL OFF: closing the port must NOT drop DTR.
      *
-     * Ein CGI oeffnet und schliesst den Port bei jedem Aufruf - die
-     * Zustandsabfrage laeuft sekuendlich. Wuerde dabei DTR fallen,
-     * risse das den TNC2C bei jedem Aufruf aus dem KISS-Modus in einen
-     * Echo-only-Zustand. Genau deshalb ging kein PTT mehr.
+     * A CGI opens and closes the port on every call - the state poll
+     * runs every second. If DTR dropped there, it would tear the TNC2C
+     * out of KISS mode into an echo-only state on every call. That is
+     * exactly why PTT stopped working.
      *
-     * Der KISS-Modus soll DAUERHAFT halten, auch wenn zwischen zwei
-     * Anfragen kein Prozess mehr am Port haengt.
+     * KISS mode is meant to be PERMANENT, even when no process is
+     * attached to the port between two requests.
      */
     t.c_cflag &= ~(unsigned)HUPCL;
 
@@ -157,23 +157,23 @@ int pr_serial_open(pr_serial *s, const char *dev,
     if (stopbits == 2)
         t.c_cflag |= (unsigned)CSTOPB;
 
-    /* Keine Hardware-Flusskontrolle - bei TNCs ueblich und sicherer. */
+    /* No hardware flow control - usual for TNCs and safer.           */
 #ifdef CRTSCTS
     t.c_cflag &= ~(unsigned)CRTSCTS;
 #endif
 
     t.c_cc[VMIN]  = 0;
-    t.c_cc[VTIME] = 5;     /* 0,5 s zwischen Bytes */
+    t.c_cc[VTIME] = 5;     /* 0.5 s between bytes  */
 
     if (cfsetispeed(&t, sp) != 0 || cfsetospeed(&t, sp) != 0) {
-        snprintf(err, errlen, "Baudrate %ld konnte nicht gesetzt werden: %s",
+        snprintf(err, errlen, "baud rate %ld could not be set: %s",
                  baud, strerror(errno));
         close(fd);
         return -1;
     }
 
     if (tcsetattr(fd, TCSANOW, &t) != 0) {
-        snprintf(err, errlen, "tcsetattr auf %s fehlgeschlagen: %s",
+        snprintf(err, errlen, "tcsetattr on %s failed: %s",
                  dev, strerror(errno));
         close(fd);
         return -1;
@@ -181,14 +181,14 @@ int pr_serial_open(pr_serial *s, const char *dev,
     tcflush(fd, TCIOFLUSH);
 
     /*
-     * Modemleitungen. Wichtig fuer TNC2C-Klone: ohne DTR/RTS bleibt der
-     * TNC in einem Zustand, aus dem er nicht antwortet.
+     * Modem lines. Important for TNC2C clones: without DTR/RTS the TNC
+     * stays in a state where it does not respond.
      *
-     * WICHTIG: gesetzt wird mit TIOCMBIS (Bits setzen) - das geht OHNE
-     * vorheriges Lesen. Ein frueherer Entwurf hat zuerst TIOCMGET
-     * aufgerufen und bei Fehlschlag das Setzen still uebersprungen; auf
-     * diesem Port ist TIOCMGET nicht verfuegbar, dadurch lagen die
-     * Leitungen nie an und das TNC antwortete nicht.
+     * IMPORTANT: setting is done with TIOCMBIS (set bits) - that
+     * works WITHOUT reading first. An earlier draft called TIOCMGET
+     * first and silently skipped setting on failure; on this port
+     * TIOCMGET is not available, so the lines never came up and the
+     * TNC did not answer.
      */
     if (rts_dtr) {
 #if defined(TIOCMBIS)
@@ -199,8 +199,8 @@ int pr_serial_open(pr_serial *s, const char *dev,
         (void)ioctl(fd, TIOCMSET, &lines);
 #endif
         /*
-         * Zusatzversuch ueber den Les-Schreib-Weg. Wenn er fehlschlaegt,
-         * ist das nicht fatal - TIOCMBIS hat die Arbeit bereits erledigt.
+         * Extra attempt via the read/write path. If it fails, that is
+         * not fatal - TIOCMBIS has already done the work.
          */
 #ifdef TIOCMGET
         {
@@ -223,7 +223,7 @@ void pr_serial_close(pr_serial *s)
     if (s == NULL)
         return;
     if (s->fd >= 0) {
-        /* Leitungen lassen wir fallen - das ist der Normalfall beim Abhaengen */
+        /* We drop the lines - that is the normal case when detaching          */
         close(s->fd);
     }
     s->fd = -1;
@@ -259,14 +259,14 @@ bool pr_serial_parse_line(const char *s, int *databits, int *parity, int *stopbi
 }
 
 /* ======================================================================= */
-/* Lesen und Schreiben                                                     */
+/* Reading and writing                                                     */
 /* ======================================================================= */
 
 int pr_serial_write(pr_serial *s, const void *buf, size_t len,
                     char *err, size_t errlen)
 {
     if (!pr_serial_ok(s)) {
-        snprintf(err, errlen, "Schnittstelle nicht offen");
+        snprintf(err, errlen, "interface not open");
         return -1;
     }
 
@@ -284,16 +284,16 @@ int pr_serial_write(pr_serial *s, const void *buf, size_t len,
             pfd.fd = s->fd;
             pfd.events = POLLOUT;
             if (poll(&pfd, 1, 1000) <= 0) {
-                snprintf(err, errlen, "Schreibzeitlimit auf %s", s->dev);
+                snprintf(err, errlen, "write timeout on %s", s->dev);
                 return -1;
             }
             continue;
         }
-        snprintf(err, errlen, "Schreibfehler auf %s: %s", s->dev, strerror(errno));
+        snprintf(err, errlen, "write error on %s: %s", s->dev, strerror(errno));
         return -1;
     }
 
-    /* Auf das tatsaechliche Absetzen warten - bei TNCs wichtig */
+    /* Wait for the actual drain - important for TNCs           */
     (void)tcdrain(s->fd);
     return 0;
 }
@@ -302,7 +302,7 @@ long pr_serial_read(pr_serial *s, void *buf, size_t cap,
                     int timeout_ms, char *err, size_t errlen)
 {
     if (!pr_serial_ok(s)) {
-        if (errlen > 0) snprintf(err, errlen, "Schnittstelle nicht offen");
+        if (errlen > 0) snprintf(err, errlen, "interface not open");
         return -1;
     }
     if (cap == 0)
@@ -314,12 +314,12 @@ long pr_serial_read(pr_serial *s, void *buf, size_t cap,
 
     int pr = poll(&pfd, 1, timeout_ms);
     if (pr == 0)
-        return 0;                       /* Zeitlimit */
+        return 0;                       /* Timeout   */
     if (pr < 0) {
         if (errno == EINTR)
             return 0;
         if (errlen > 0)
-            snprintf(err, errlen, "poll auf %s: %s", s->dev, strerror(errno));
+            snprintf(err, errlen, "poll on %s: %s", s->dev, strerror(errno));
         return -1;
     }
 
@@ -328,7 +328,7 @@ long pr_serial_read(pr_serial *s, void *buf, size_t cap,
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
             return 0;
         if (errlen > 0)
-            snprintf(err, errlen, "Lesefehler auf %s: %s", s->dev, strerror(errno));
+            snprintf(err, errlen, "read error on %s: %s", s->dev, strerror(errno));
         return -1;
     }
     return (long)n;
@@ -349,8 +349,8 @@ long pr_serial_read_quiet(pr_serial *s, void *buf, size_t cap,
             return -1;
         if (n == 0) {
             if (first && total == 0)
-                return 0;               /* gar nichts angekommen */
-            break;                      /* Ruhe: Antwort ist vollstaendig */
+                return 0;               /* nothing arrived at all */
+            break;                      /* Quiet: response is complete    */
         }
         total += (size_t)n;
         first = 0;
@@ -375,13 +375,13 @@ int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
                           int parity, int stopbits, char *err, size_t errlen)
 {
     if (!pr_serial_ok(s)) {
-        snprintf(err, errlen, "Schnittstelle nicht offen");
+        snprintf(err, errlen, "interface not open");
         return -1;
     }
 
     speed_t sp;
     if (baud_to_flag(baud, &sp) != 0) {
-        snprintf(err, errlen, "Baudrate %ld wird nicht unterstuetzt", baud);
+        snprintf(err, errlen, "baud rate %ld is not supported", baud);
         return -1;
     }
 
@@ -394,15 +394,15 @@ int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
     t.c_cflag &= ~(unsigned)(CSIZE | PARENB | PARODD | CSTOPB);
 
     /*
-     * HUPCL AUS: der Port darf beim Schliessen DTR NICHT fallen lassen.
+     * HUPCL OFF: closing the port must NOT drop DTR.
      *
-     * Ein CGI oeffnet und schliesst den Port bei jedem Aufruf - die
-     * Zustandsabfrage laeuft sekuendlich. Wuerde dabei DTR fallen,
-     * risse das den TNC2C bei jedem Aufruf aus dem KISS-Modus in einen
-     * Echo-only-Zustand. Genau deshalb ging kein PTT mehr.
+     * A CGI opens and closes the port on every call - the state poll
+     * runs every second. If DTR dropped there, it would tear the TNC2C
+     * out of KISS mode into an echo-only state on every call. That is
+     * exactly why PTT stopped working.
      *
-     * Der KISS-Modus soll DAUERHAFT halten, auch wenn zwischen zwei
-     * Anfragen kein Prozess mehr am Port haengt.
+     * KISS mode is meant to be PERMANENT, even when no process is
+     * attached to the port between two requests.
      */
     t.c_cflag &= ~(unsigned)HUPCL;
 
@@ -413,7 +413,7 @@ int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
     if (stopbits == 2)              t.c_cflag |= (unsigned)CSTOPB;
 
     if (cfsetispeed(&t, sp) != 0 || cfsetospeed(&t, sp) != 0) {
-        snprintf(err, errlen, "Baudrate %ld nicht setzbar: %s", baud, strerror(errno));
+        snprintf(err, errlen, "baud rate %ld not settable: %s", baud, strerror(errno));
         return -1;
     }
     if (tcsetattr(s->fd, TCSANOW, &t) != 0) {
@@ -431,14 +431,14 @@ int pr_serial_reconfigure(pr_serial *s, long baud, int databits,
 int pr_serial_hold_dtr(pr_serial *s, char *err, size_t errlen)
 {
     if (!pr_serial_ok(s)) {
-        snprintf(err, errlen, "Schnittstelle nicht offen");
+        snprintf(err, errlen, "interface not open");
         return -1;
     }
 #if defined(TIOCMBIS)
     {
         int bits = TIOCM_RTS | TIOCM_DTR;
         if (ioctl(s->fd, TIOCMBIS, &bits) != 0) {
-            snprintf(err, errlen, "DTR/RTS nicht setzbar: %s", strerror(errno));
+            snprintf(err, errlen, "DTR/RTS not settable: %s", strerror(errno));
             return -1;
         }
     }

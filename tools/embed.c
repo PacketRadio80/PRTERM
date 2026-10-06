@@ -7,7 +7,7 @@
  *
  * Runs on the build host only, it is never part of the CGI binary.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include <stdio.h>
 #include <stdlib.h>

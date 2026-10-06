@@ -1,9 +1,9 @@
 /*
- * PRTERM - Test: INI-Parser
- * Wichtigste Eigenschaft: Kommentare und Reihenfolge ueberleben das
- * Speichern - die prterm.ini ist dokumentiert und wird von Hand gepflegt.
+ * PRTERM - Test: INI parser
+ * Most important property: comments and order survive saving - the
+ * prterm.ini is documented and maintained by hand.
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "prterm_compat.h"
 
@@ -44,19 +44,19 @@ int main(void)
     CHECK_STR(ini_get(i, "site", "fehlt", "DEFAULT"), "DEFAULT");
     CHECK_INT(ini_section_count(i, "ban"), 1);
 
-    /* Schluessel und Sektionen sind case-insensitiv */
+    /* Keys and sections are case-insensitive        */
     CHECK_STR(ini_get(i, "SITE", "NAME", "?"), "PRTERM");
 
     printf("\n== INI schreiben ==\n");
-    ini_set(i, "radio", "duplex", "half");     /* vorhandenen Wert aendern */
-    ini_set_int(i, "radio", "rx_poll_ms", 250); /* neuen Schluessel        */
-    ini_set(i, "admin", "user", "admin");       /* neue Sektion            */
-    ini_del(i, "site", "language");             /* loeschen                */
+    ini_set(i, "radio", "duplex", "half");     /* change existing value    */
+    ini_set_int(i, "radio", "rx_poll_ms", 250); /* new key                 */
+    ini_set(i, "admin", "user", "admin");       /* new section             */
+    ini_del(i, "site", "language");             /* delete                  */
 
     char *out = ini_dump(i);
     CHECK(out != NULL);
 
-    printf("\n--- gespeichert ---\n%s-------------------\n", out);
+    printf("\n--- saved ---\n%s-------------------\n", out);
 
     CHECK(strstr(out, "; Kopfkommentar") != NULL);
     CHECK(strstr(out, "# zweite Kommentarform") != NULL);
@@ -67,7 +67,7 @@ int main(void)
     CHECK(strstr(out, "language") == NULL);
     CHECK(strstr(out, "freq_hz = 27125000") != NULL);
 
-    /* Keine Dopplungen */
+    /* No duplicates    */
     {
         const char *p = strstr(out, "rx_poll_ms");
         CHECK(p != NULL);
@@ -90,7 +90,7 @@ int main(void)
     {
         ini *k = ini_parse("nur text ohne format\n[tiefe\nkey ohne wert\n",
                            err, sizeof err);
-        CHECK(k != NULL);          /* muss toleriert werden */
+        CHECK(k != NULL);          /* must be tolerated     */
         ini_free(k);
     }
     {
