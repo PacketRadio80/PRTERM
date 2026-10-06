@@ -55,6 +55,10 @@ int main(void)
 
     char *out = ini_dump(i);
     CHECK(out != NULL);
+    if (out == NULL) {
+        ini_free(i);
+        TEST_SUMMARY("ini");
+    }
 
     printf("\n--- saved ---\n%s-------------------\n", out);
 
