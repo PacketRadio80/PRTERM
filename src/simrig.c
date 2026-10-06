@@ -168,8 +168,8 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
     if (first_time) {
         sim_note(r, PR_MSG_SYS, "SYS",
                  s->st.duplex == PR_DUPLEX_FULL
-                     ? "simulation started (full duplex: reception continues while transmitting)"
-                     : "simulation started (half duplex: no reception while transmitting)");
+                     ? pr_trs("simulation started (full duplex: reception continues while transmitting)")
+                     : pr_trs("simulation started (half duplex: no reception while transmitting)"));
     }
     return 0;
 }

@@ -555,7 +555,7 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
             const pr_rig_vtbl *v = pr_rig_at(i);
             if (v == NULL) continue;
             vals[n] = v->name;
-            lbl[n]  = v->description;
+            lbl[n]  = pr_trs(v->description);
             n++;
         }
         html_select(out, "driver", vals, lbl, n, cfg->rig_driver,

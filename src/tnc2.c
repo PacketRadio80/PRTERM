@@ -555,7 +555,7 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
     t->st.rx_muted = false;
 
     tnc2_note(r, PR_MSG_TX, r->cfg->callerid,
-              "[empty test carrier]");
+              pr_trs("[empty test carrier]"));
     t->st.tx_count++;
     t->st.last_tx_ts = pr_now_s();
     tnc2_save(r, t);
