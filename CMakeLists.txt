@@ -183,6 +183,16 @@ if(BUILD_TESTING)
         target_compile_options(test_${_t} PRIVATE ${PRTERM_WARN_FLAGS})
         add_test(NAME ${_t} COMMAND test_${_t})
     endforeach()
+
+    # Integration: prterm-tncd against a FAKE TNC on a pseudo terminal.
+    # No hardware, no RF - the test plays the TNC2C and checks that the
+    # daemon enters KISS once and holds it (see tests/test_tncd.c).
+    add_executable(test_tncd tests/test_tncd.c)
+    target_link_libraries(test_tncd PRIVATE prterm_core)
+    target_compile_options(test_tncd PRIVATE ${PRTERM_WARN_FLAGS})
+    add_dependencies(test_tncd prterm-tncd)
+    add_test(NAME tncd COMMAND test_tncd $<TARGET_FILE:prterm-tncd>)
+    set_tests_properties(tncd PROPERTIES TIMEOUT 120)
 endif()
 
 # ---------------------------------------------------------------------------

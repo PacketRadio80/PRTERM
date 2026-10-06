@@ -692,6 +692,52 @@ static int make_listener(const char *path, char *err, size_t errlen)
 /* ======================================================================= */
 
 /*
+ * A client connection must NOT stop reception.
+ *
+ * The first draft handled a connection in a nested blocking read()
+ * loop - as long as one client held its socket, the device was never
+ * pumped and the daemon went deaf. The poll loop below knows three
+ * things at once: the listener, the device and every open client.
+ */
+#define TNCD_MAX_CLIENTS 8
+
+typedef struct tncd_client {
+    int           fd;
+    tncd_station *st;
+    char          line[PR_TNCSOCK_MAX_LINE];
+    size_t        len;
+} tncd_client;
+
+static void client_close(tncd_client *cl)
+{
+    if (cl->fd >= 0)
+        close(cl->fd);
+    cl->fd = -1;
+    cl->st = NULL;
+    cl->len = 0;
+}
+
+/* Feed one read chunk; every complete line becomes a command. */
+static void client_feed(tncd_client *cl, const char *data, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        char c = data[i];
+        if (c == '\n') {
+            cl->line[cl->len] = '\0';
+            if (pr_str_eq_ci(cl->line, PR_TNC_CMD_CLOSE)) {
+                client_close(cl);
+                return;
+            }
+            handle_command(cl->st, cl->fd, cl->line);
+            cl->len = 0;
+            continue;
+        }
+        if (cl->len + 1 < sizeof cl->line)
+            cl->line[cl->len++] = c;
+    }
+}
+
+/*
  * The watch is the MAX25 "serial watch": look at the link every now
  * and then, repair when it is broken - and touch nothing when KISS is
  * held. A periodic re-entry into KISS is exactly what used to disturb
@@ -721,8 +767,15 @@ static void station_watch(tncd_station *st)
 
 static int run_daemon(tncd_station *stations, size_t nst)
 {
+    tncd_client clients[TNCD_MAX_CLIENTS];
+    for (size_t i = 0; i < TNCD_MAX_CLIENTS; i++) {
+        clients[i].fd = -1;
+        clients[i].st = NULL;
+        clients[i].len = 0;
+    }
+
     while (!g_stop) {
-        struct pollfd pfd[TNCD_MAX_STATIONS * 2];
+        struct pollfd pfd[TNCD_MAX_STATIONS * 2 + TNCD_MAX_CLIENTS];
         size_t np = 0;
 
         for (size_t i = 0; i < nst; i++) {
@@ -737,6 +790,13 @@ static int run_daemon(tncd_station *stations, size_t nst)
                 np++;
             }
         }
+        for (size_t i = 0; i < TNCD_MAX_CLIENTS; i++) {
+            if (clients[i].fd >= 0) {
+                pfd[np].fd = clients[i].fd;
+                pfd[np].events = POLLIN;
+                np++;
+            }
+        }
 
         int r = poll(pfd, np, 250);
         if (r < 0) {
@@ -745,39 +805,73 @@ static int run_daemon(tncd_station *stations, size_t nst)
             break;
         }
 
+        /* Reception from the device - and never while a client is
+         * busy: the pump runs first, in every loop iteration. */
+        for (size_t i = 0; i < nst; i++) {
+            if (stations[i].open)
+                station_pump(&stations[i]);
+        }
+
+        /* New connections */
         for (size_t i = 0; i < nst; i++) {
             tncd_station *st = &stations[i];
+            struct pollfd one = { st->listen_fd, POLLIN, 0 };
+            if (st->listen_fd < 0 ||
+                poll(&one, 1, 0) <= 0 || !(one.revents & POLLIN))
+                continue;
 
-            /* Collect reception from the device */
-            if (st->open)
-                station_pump(st);
+            int cfd = accept(st->listen_fd, NULL, NULL);
+            if (cfd < 0)
+                continue;
 
-            /* Accept a new connection and process it immediately */
-            if (st->listen_fd >= 0) {
-                struct pollfd one = { st->listen_fd, POLLIN, 0 };
-                if (poll(&one, 1, 0) > 0 && (one.revents & POLLIN)) {
-                    int cfd = accept(st->listen_fd, NULL, NULL);
-                    if (cfd >= 0) {
-                        char line[PR_TNCSOCK_MAX_LINE];
-                        ssize_t n;
-                        while ((n = read(cfd, line, sizeof line - 1)) > 0) {
-                            line[n] = '\0';
-                            char *nl = strchr(line, '\n');
-                            if (nl) *nl = '\0';
-                            if (pr_str_eq_ci(line, PR_TNC_CMD_CLOSE))
-                                break;
-                            handle_command(st, cfd, line);
-                        }
-                        close(cfd);
-                    }
+            size_t slot = TNCD_MAX_CLIENTS;
+            for (size_t k = 0; k < TNCD_MAX_CLIENTS; k++) {
+                if (clients[k].fd < 0) {
+                    slot = k;
+                    break;
                 }
             }
+            if (slot == TNCD_MAX_CLIENTS) {
+                close(cfd);       /* busy - the CGI retries        */
+                continue;
+            }
+            clients[slot].fd  = cfd;
+            clients[slot].st  = st;
+            clients[slot].len = 0;
+        }
 
-            if (st->open)
-                station_watch(st);
+        /* Commands of the connected clients                       */
+        for (size_t i = 0; i < TNCD_MAX_CLIENTS; i++) {
+            tncd_client *cl = &clients[i];
+            if (cl->fd < 0)
+                continue;
+
+            struct pollfd one = { cl->fd, POLLIN, 0 };
+            if (poll(&one, 1, 0) <= 0)
+                continue;
+
+            if (one.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                client_close(cl);
+                continue;
+            }
+
+            char buf[2048];
+            ssize_t n = read(cl->fd, buf, sizeof buf);
+            if (n <= 0) {
+                client_close(cl);
+                continue;
+            }
+            client_feed(cl, buf, (size_t)n);
+        }
+
+        for (size_t i = 0; i < nst; i++) {
+            if (stations[i].open)
+                station_watch(&stations[i]);
         }
     }
 
+    for (size_t i = 0; i < TNCD_MAX_CLIENTS; i++)
+        client_close(&clients[i]);
     for (size_t i = 0; i < nst; i++) {
         if (stations[i].listen_fd >= 0) {
             close(stations[i].listen_fd);

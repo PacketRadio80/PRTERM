@@ -432,7 +432,7 @@ of v1.0.0.
 ctest --test-dir build --output-on-failure
 ```
 
-Eight suites, all independent of hardware:
+Nine suites, all independent of hardware:
 
 | Suite | Covers |
 |---|---|
@@ -444,6 +444,7 @@ Eight suites, all independent of hardware:
 | `kiss` | KISS framing and escaping |
 | `probe` | TNC banner detection, echo stripping, profile scoring |
 | `state` | runtime init, state load/save, log tail, locking |
+| `tncd` | `prterm-tncd` against a **fake TNC on a pseudo terminal**: KISS entry order (leave KISS → MYCALL → `ESC @K` → parameters), frame relay, RX pass-through, in-place repair via `CHECKUP`, leave KISS on shutdown — plus the `tnc2` driver path end to end |
 
 ### Build options
 
