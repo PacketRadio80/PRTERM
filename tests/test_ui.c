@@ -234,6 +234,13 @@ int main(void)
     CHECK_STR(pr_tr("xx", "Send"), "Send");       /* unknown: English  */
     CHECK_STR(pr_tr("de", "not in the catalog"), "not in the catalog");
 
+    /* and the messages of the request layer too                     */
+    CHECK_STR(pr_tr("de", "no rig connected"), "kein Gerät verbunden");
+    CHECK_STR(pr_tr("fr", "login required"), "connexion requise");
+    CHECK_STR(pr_tr("es", "CALLERID is banned"), "CALLERID está bloqueado");
+    CHECK_STR(pr_tr("pt", "transmitting requires login"),
+              "para transmitir é necessário iniciar sessão");
+
     /* second marker: the heading "General" of the administration     */
     check_language(&cfg, &admin, &st, "de", "Senden", "Allgemein");
     check_language(&cfg, &admin, &st, "es", "Enviar", "General");

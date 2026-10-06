@@ -143,18 +143,21 @@ static int app_tx_gate(app *a, const pr_session *sess,
                        char *err, size_t errlen)
 {
     if (!a->rig_ok) {
-        snprintf(err, errlen, "no rig connected");
+        snprintf(err, errlen, "%s",
+                 pr_tr(a->cfg->language, "no rig connected"));
         return -1;
     }
     if (a->st.monitor) {
-        snprintf(err, errlen, "monitor mode: transmitting is locked");
+        snprintf(err, errlen, "%s",
+                 pr_tr(a->cfg->language, "monitor mode: transmitting is locked"));
         return -1;
     }
 
     /* Callsign   */
     const char *from = a->cfg->callerid;
     if (pr_config_is_banned(a->cfg, from)) {
-        snprintf(err, errlen, "CALLERID %s is banned", from);
+        snprintf(err, errlen, "%s (%s)",
+                 pr_tr(a->cfg->language, "CALLERID is banned"), from);
         return -1;
     }
 
@@ -164,7 +167,8 @@ static int app_tx_gate(app *a, const pr_session *sess,
         return -1;
 
     if (sess != NULL && !sess->valid && !a->cfg->allow_guest_tx) {
-        snprintf(err, errlen, "transmitting requires login");
+        snprintf(err, errlen, "%s",
+                 pr_tr(a->cfg->language, "transmitting requires login"));
         return -1;
     }
     return 0;
@@ -989,7 +993,7 @@ static bool check_csrf(const pr_config *cfg, const pr_request *req,
     (void)cfg;
     const char *tok = pr_req_param(req, "csrf");
     if (sess->valid && !pr_session_check_csrf(sess, tok)) {
-        json_err(res, "session expired or invalid token");
+        json_err(res, pr_tr(cfg->language, "session expired or invalid token"));
         return false;
     }
     return true;
@@ -1076,8 +1080,8 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                              pr_str_eq_ci(to, "CQ"));
             if (is_bcast && !bcast_ok) {
                 json_err(res,
-                    "broadcast is only allowed under \"All\" - "
-                    "with a single device please address a station");
+                    pr_tr(cfg->language, "broadcast is only allowed under \"All\" - "
+                    "with a single device please address a station"));
                 app_stop(&a);
                 return 0;
             }
@@ -1138,7 +1142,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
                 json_err(res, err);
             } else if (a.rig.vtbl->carrier_test == NULL) {
-                json_err(res, "this driver does not support a test carrier");
+                json_err(res, pr_tr(cfg->language, "this driver does not support a test carrier"));
             } else if (a.rig.vtbl->carrier_test(&a.rig, 3, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
@@ -1264,7 +1268,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             char err[256];
 
             if (!pr_login_throttle(cfg, req->remote_addr)) {
-                json_err(res, "too many failed attempts - please try again later");
+                json_err(res, pr_tr(cfg->language, "too many failed attempts - please try again later"));
             } else if (!pr_session_login(cfg, user, pass, &s, err, sizeof err)) {
                 pr_login_fail(cfg, req->remote_addr);
                 json_err(res, err);
@@ -1301,7 +1305,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             strcmp(action, "config_save") == 0) {
 
             if (!sess.valid) {
-                json_err(res, "login required");
+                json_err(res, pr_tr(cfg->language, "login required"));
                 app_stop(&a);
                 return 0;
             }

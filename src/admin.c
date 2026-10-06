@@ -46,7 +46,7 @@ static void json_err(pr_response *res, const char *msg)
 static bool persist(pr_config *cfg, pr_response *res)
 {
     if (cfg->raw == NULL) {
-        json_err(res, "no configuration loaded");
+        json_err(res, pr_tr(cfg->language, "no configuration loaded"));
         return false;
     }
     char err[256];
@@ -94,8 +94,8 @@ static void act_save_station(pr_request *req, pr_response *res, pr_config *cfg)
 {
     char call[PR_CALLSIGN_MAX];
     if (!callerid_normalize(call, sizeof call, arg(req, "callerid"), &cfg->callsign)) {
-        json_err(res, "CALLERID is invalid (base max. 6 characters, "
-                      "SSID \"-<digit>\", total max. 8)");
+        json_err(res, pr_tr(cfg->language, "CALLERID is invalid (base max. 6 characters, "
+                      "SSID \"-<digit>\", total max. 8)"));
         return;
     }
     ini_set(cfg->raw, "station", "callerid", call);
@@ -110,13 +110,13 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
 
     const char *driver = arg(req, "driver");
     if (pr_rig_find(driver) == NULL) {
-        json_err(res, "unknown rig driver");
+        json_err(res, pr_tr(cfg->language, "unknown rig driver"));
         return;
     }
 
     const char *duplex = arg(req, "duplex");
     if (strcmp(duplex, "full") != 0 && strcmp(duplex, "half") != 0) {
-        json_err(res, "duplex must be \"full\" or \"half\"");
+        json_err(res, pr_tr(cfg->language, "duplex must be \"full\" or \"half\""));
         return;
     }
 
@@ -124,7 +124,7 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
     const char *mode = arg(req, "mode");
     unsigned mode_bit = pr_band_mode_from_name(mode);
     if (mode_bit == 0) {
-        json_err(res, "mode must be \"fm\", \"am\" or \"ssb\"");
+        json_err(res, pr_tr(cfg->language, "mode must be \"fm\", \"am\" or \"ssb\""));
         return;
     }
 
@@ -171,11 +171,11 @@ static void act_save_callsign(pr_request *req, pr_response *res, pr_config *cfg)
     long d = pr_parse_long(arg(req, "callerid_ssid_digits"), 1, NULL);
 
     if (a < 1 || a > 10 || b < 1 || b > 10 || c < 1 || c > 16 || d < 0 || d > 2) {
-        json_err(res, "callsign rules outside the allowed limits");
+        json_err(res, pr_tr(cfg->language, "callsign rules outside the allowed limits"));
         return;
     }
     if (c < b) {
-        json_err(res, "total length must not be smaller than the base");
+        json_err(res, pr_tr(cfg->language, "total length must not be smaller than the base"));
         return;
     }
 
@@ -189,7 +189,7 @@ static void act_save_callsign(pr_request *req, pr_response *res, pr_config *cfg)
     if (persist(cfg, res)) {
         /* Check whether our own CALLERID is still valid under the new rules */
         if (!callerid_valid(cfg->callerid, &cfg->callsign)) {
-            json_err(res, "the new rule makes your own CALLERID invalid");
+            json_err(res, pr_tr(cfg->language, "the new rule makes your own CALLERID invalid"));
             return;
         }
         json_ok(res);
@@ -203,7 +203,7 @@ static void act_save_ui(pr_request *req, pr_response *res, pr_config *cfg)
     if (font[0] != '\0') {
         char mime[32];
         if (!html_font_mime(font, mime, sizeof mime)) {
-            json_err(res, "font file must be .ttf, .otf, .woff or .woff2");
+            json_err(res, pr_tr(cfg->language, "font file must be .ttf, .otf, .woff or .woff2"));
             return;
         }
     }
@@ -211,22 +211,22 @@ static void act_save_ui(pr_request *req, pr_response *res, pr_config *cfg)
     long size = pr_parse_long(arg(req, "font_size"), 14, NULL);
     long lh   = pr_parse_long(arg(req, "line_height"), 120, NULL);
     if (size < 6 || size > 96) {
-        json_err(res, "font size must be between 6 and 96");
+        json_err(res, pr_tr(cfg->language, "font size must be between 6 and 96"));
         return;
     }
     if (lh < 100 || lh > 300) {
-        json_err(res, "line height must be between 100% and 300%");
+        json_err(res, pr_tr(cfg->language, "line height must be between 100% and 300%"));
         return;
     }
 
     const char *density = arg(req, "density");
     if (strcmp(density, "compact") != 0 && strcmp(density, "normal") != 0) {
-        json_err(res, "density must be \"compact\" or \"normal\"");
+        json_err(res, pr_tr(cfg->language, "density must be \"compact\" or \"normal\""));
         return;
     }
     const char *theme = arg(req, "theme");
     if (strcmp(theme, "silver") != 0 && strcmp(theme, "dark") != 0) {
-        json_err(res, "theme must be \"silver\" or \"dark\"");
+        json_err(res, pr_tr(cfg->language, "theme must be \"silver\" or \"dark\""));
         return;
     }
 
@@ -247,11 +247,11 @@ static void act_ban_add(pr_request *req, pr_response *res, pr_config *cfg)
     pr_upper(pattern);
 
     if (pattern[0] == '\0') {
-        json_err(res, "pattern must not be empty");
+        json_err(res, pr_tr(cfg->language, "pattern must not be empty"));
         return;
     }
     if (strlen(pattern) >= sizeof pattern) {
-        json_err(res, "pattern too long");
+        json_err(res, pr_tr(cfg->language, "pattern too long"));
         return;
     }
 
@@ -267,7 +267,7 @@ static void act_ban_del(pr_request *req, pr_response *res, pr_config *cfg)
     pr_upper(pattern);
 
     if (!ini_del(cfg->raw, "ban", pattern)) {
-        json_err(res, "no such ban entry");
+        json_err(res, pr_tr(cfg->language, "no such ban entry"));
         return;
     }
     if (persist(cfg, res)) json_ok(res);
@@ -286,21 +286,21 @@ static void act_pass_change(pr_request *req, pr_response *res, pr_config *cfg,
      * never be possible without knowing the current one.
      */
     if (!pr_auth_check_password(cfg, oldp)) {
-        json_err(res, "old password is wrong");
+        json_err(res, pr_tr(cfg->language, "old password is wrong"));
         return;
     }
     if (strlen(newp) < 8) {
-        json_err(res, "new password must have at least 8 characters");
+        json_err(res, pr_tr(cfg->language, "new password must have at least 8 characters"));
         return;
     }
     if (strcmp(newp, new2) != 0) {
-        json_err(res, "password repetition does not match");
+        json_err(res, pr_tr(cfg->language, "password repetition does not match"));
         return;
     }
 
     char hash[160];
     if (pr_hash_password(newp, hash, sizeof hash) != 0) {
-        json_err(res, "hash could not be created");
+        json_err(res, pr_tr(cfg->language, "hash could not be created"));
         return;
     }
     ini_set(cfg->raw, "admin", "pass_hash", hash);
@@ -361,7 +361,7 @@ int pr_admin_action(pr_request *req, pr_response *res,
 {
     const char *action = pr_req_param(req, "action");
     if (action == NULL) {
-        json_err(res, "no action");
+        json_err(res, pr_tr(cfg->language, "no action"));
         return 0;
     }
 
@@ -374,7 +374,7 @@ int pr_admin_action(pr_request *req, pr_response *res,
     else if (strcmp(action, "ban_del")      == 0) act_ban_del(req, res, cfg);
     else if (strcmp(action, "pass_change")  == 0) act_pass_change(req, res, cfg, sess);
     else if (strcmp(action, "config_save")  == 0) act_config_save(req, res, cfg);
-    else json_err(res, "unknown action");
+    else json_err(res, pr_tr(cfg->language, "unknown action"));
 
     return 0;
 }
