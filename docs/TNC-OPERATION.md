@@ -221,6 +221,47 @@ After the host has power-cycled:
 
 ---
 
+## 10. Updating a running deployment
+
+The source tree builds the binaries; a deployed instance (web directory +
+`prterm.ini` + `prterm.runtime/`) runs them. Two things make an update
+different from an ordinary restart:
+
+1. **The daemon restart is the KISS entry.** `prterm-tncd` puts the TNC2C into
+   KISS when it starts (leave KISS → probe → recovery ladder if needed →
+   MYCALL → `ESC @K` → KISS parameters). Do the update when you can watch the
+   device — that is the moment to verify PTT anyway.
+2. **Never overwrite the deployment INI.** It carries local decisions the
+   source sample does not have: the admin `pass_hash`, whether MailboxD is
+   enabled, and the deployment's own paths. Merge the changes; obsolete keys
+   like `tx_mode` may simply stay — unknown keys are ignored.
+
+Checklist:
+
+```sh
+# 1. build + test in the source tree
+ctest --test-dir build --output-on-failure
+
+# 2. stop the daemon (it holds the ports - nothing else may have them)
+pkill -f 'prterm-tncd .*prterm.ini'
+
+# 3. copy the binaries, merge the INI by hand
+cp build/prterm.cgi build/prterm-tncd /path/to/deployment/
+
+# 4. start the daemon first, then look at it
+/path/to/deployment/prterm-tncd /path/to/deployment/prterm.ini
+#   -> "KISS held" per station; the watch repairs on its own if not
+
+# 5. verify (see §3 step 5): send once, then IMMEDIATELY again -
+#    the second frame is the one that catches a lost KISS
+```
+
+`prterm.cgi --checkup prterm.ini` goes through the daemon when it is running
+and repairs the link in place. With a stopped daemon it touches the port
+directly — then only one process may have it.
+
+---
+
 ## See also
 
 | Topic | Document |
