@@ -42,17 +42,6 @@ typedef struct pr_station {
     char modem[32];
     char serial_line[8];
     char kiss_init[16];           /* "esc" or "tapr" - see radio.h     */
-    /*
-     * How transmission works:
-     *   kiss     KISS data frames
-     *   unproto  leave KISS, send "UNPROTO <dest> 0 <text>",
-     *            re-enter KISS
-     *
-     * TheFirmware (TNC2 class) ignores KISS data on hybrid setups,
-     * while UNPROTO from command mode switches the carrier reliably.
-     * That is why "unproto" is the safe choice.
-     */
-    char tx_mode[16];
     char callerid[PR_CALLSIGN_MAX];
     char antenna[64];              /* Description, for display             */
     bool enabled;
@@ -95,9 +84,11 @@ typedef struct pr_config {
      * see docs/TNC-INIT.md:
      *   esc   1B 40 4B  (ESC @K, no \r)     - Landolt TNC2C
      *   tapr  "kiss on\r"                   - PK-TNC2, TAPR class
+     *
+     * KISS is then HELD - prterm-tncd enters it once and transmits
+     * with KISS DATA frames. There is no switching for a send.
      */
     char kiss_init[16];
-    char tx_mode[16];
     long freq_hz;
     unsigned mode;            /* PR_BAND_FM / _AM / _SSB */
     long tx_power_mw;         /* TX power for the compliance check          */

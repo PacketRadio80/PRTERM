@@ -6,6 +6,10 @@
  *
  * Field experience that shapes this driver:
  *
+ *   - The daemon (prterm-tncd) holds the port and holds KISS. This
+ *     driver never touches the device - it talks to the daemon and
+ *     speaks KISS frames, nothing else.
+ *
  *   - DO NOT CLOSE THE PORT while the device is in command mode.
  *     A falling DTR puts a TNC2C into an echo-only state. In KISS
  *     operation this is uncritical - the normal operating state.
@@ -15,7 +19,8 @@
  *
  *   - ESC V (1B 56 0D) is the probe, not INFO or HELP.
  *
- *   - ESC I <call>\r sets MYCALL (tfb.c Icmd).
+ *   - ESC I <call>\r sets MYCALL (tfb.c Icmd). Without MYCALL the
+ *     firmware does not key the transmitter on KISS DATA at all.
  *
  *   - ESC @K (1B 40 4B) switches to KISS mode WITHOUT line end.
  *
@@ -48,11 +53,7 @@ typedef struct tnc2_impl {
     pr_msg       pending[TNC2_MAX_PENDING];
     size_t       npending;
 
-    bool         in_kiss;
     char         mycall[16];
-    /* Monitor text: the daemon delivers lines, no KISS frames   */
-    char         line[512];
-    size_t       line_len;
     /*
      * Name of the station this device belongs to. Taken from the
      * configuration at open time, so every received message can name
@@ -87,54 +88,70 @@ static void tnc2_save(pr_rig *r, tnc2_impl *t)
 /* Capturing a received message                                            */
 /* ======================================================================= */
 
-
-/*
- * Evaluate a monitor line. Format of the TNC2 class:
- *
- *     FROM>TO:text
- *
- * Lines without this shape are operating hints of the TNC and are
- * discarded. Deliberately tolerant: better one line too few than one
- * wrongly assigned.
- */
-static void tnc2_handle_monitor(tnc2_impl *t, char *line)
+static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
+                         const char *text, int db)
 {
-    char *gt = strchr(line, '>');
-    char *colon = gt ? strchr(gt, ':') : NULL;
-    if (gt == NULL || colon == NULL)
-        return;
-
-    char from[PR_CALLSIGN_MAX], to[PR_CALLSIGN_MAX];
-    size_t fl = (size_t)(gt - line);
-    size_t tl = (size_t)(colon - gt) - 1;
-    if (fl == 0 || fl >= sizeof from || tl == 0 || tl >= sizeof to)
-        return;
-
-    memcpy(from, line, fl);
-    from[fl] = '\0';
-    memcpy(to, gt + 1, tl);
-    to[tl] = '\0';
-
-    pr_msg m;
-    memset(&m, 0, sizeof m);
-    m.kind = PR_MSG_RX;
-    pr_strlcpy(m.from, from, sizeof m.from);
-    pr_strlcpy(m.to, to, sizeof m.to);
-    pr_strlcpy(m.station, t->station, sizeof m.station);
-    pr_strlcpy(m.text, colon + 1, sizeof m.text);
-    m.db = t->st.rx_db;
-    m.ts = pr_now_s();
-
     if (t->npending >= TNC2_MAX_PENDING) {
         memmove(&t->pending[0], &t->pending[1],
                 (TNC2_MAX_PENDING - 1) * sizeof t->pending[0]);
         t->npending = TNC2_MAX_PENDING - 1;
     }
-    t->pending[t->npending++] = m;
+
+    pr_msg *m = &t->pending[t->npending++];
+    memset(m, 0, sizeof *m);
+    m->kind = PR_MSG_RX;
+    pr_strlcpy(m->from, from, sizeof m->from);
+    if (to != NULL)
+        pr_strlcpy(m->to, to, sizeof m->to);
+    /* Which device caught it - that is what "All" shows as origin. */
+    pr_strlcpy(m->station, t->station, sizeof m->station);
+    pr_strlcpy(m->text, text, sizeof m->text);
+    m->db = db;
+    m->ts = pr_now_s();
 }
 
+/*
+ * One received KISS DATA frame = one AX.25 frame.
+ *
+ * Layout: dest (7) | src (7) | Control (1) | PID (1) | info
+ *
+ * Only UI frames with no-layer-3 PID are interesting here. Everything
+ * else (connected traffic, digipeater hops) is not part of this
+ * terminal and is dropped deliberately.
+ */
+static void tnc2_handle_frame(tnc2_impl *t, const unsigned char *frame, size_t len)
+{
+    if (len < 16)
+        return;
 
-/* tnc2_handle_frame is dropped: command mode delivers monitor text. */
+    char to[16], from[16];
+    if (!call_from_ax25(frame, to, sizeof to))
+        return;
+    if (!call_from_ax25(frame + 7, from, sizeof from))
+        return;
+
+    unsigned char ctrl = frame[14];
+    unsigned char pid  = frame[15];
+
+    /* Only UI frames */
+    if (ctrl != 0x03u)
+        return;
+    if (pid != 0xF0u)
+        return;
+
+    char text[PR_MSG_TEXT];
+    size_t n = len - 16;
+    if (n >= sizeof text)
+        n = sizeof text - 1;
+    memcpy(text, frame + 16, n);
+    text[n] = '\0';
+
+    tnc2_push_rx(t, to, from, text, t->st.rx_db);
+    t->st.rx_count++;
+    pr_strlcpy(t->st.last_rx_from, from, sizeof t->st.last_rx_from);
+    pr_strlcpy(t->st.last_rx_text, text, sizeof t->st.last_rx_text);
+    t->st.last_rx_ts = pr_now_s();
+}
 
 
 /* ======================================================================= */
@@ -261,25 +278,16 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
 
     if (n > 0) {
         /*
-         * The daemon stays in command mode permanently - reception
-         * happens via monitor text, not via KISS frames. Format of
-         * the TNC2 class:
-         *     FROM>TO:text
-         * Anything else (prompts, messages) is discarded.
+         * The daemon holds KISS - reception arrives as KISS frames.
+         * Everything that is not framed (prompts, banners of a
+         * repairing device) is ignored by the decoder on purpose.
          */
-        for (long i = 0; i < n; i++) {
-            char c = (char)buf[i];
-            if (c == '\r')
-                continue;
-            if (c == '\n') {
-                t->line[t->line_len] = '\0';
-                if (t->line_len > 0)
-                    tnc2_handle_monitor(t, t->line);
-                t->line_len = 0;
-                continue;
-            }
-            if (t->line_len + 1 < sizeof t->line)
-                t->line[t->line_len++] = c;
+        size_t frames = kiss_decoder_feed_buf(&t->dec, buf, (size_t)n);
+        for (size_t i = 0; i < frames; i++) {
+            unsigned char frame[KISS_FRAME_MAX];
+            size_t flen = kiss_decoder_take(&t->dec, frame, sizeof frame);
+            if (flen > 0)
+                tnc2_handle_frame(t, frame, flen);
         }
     }
     return 0;
@@ -359,18 +367,14 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
     /*
      * Report the KISS parameter FULLDUPLEX (0x05) to the device.
      * That is the lever via which the hardware can do full duplex.
+     * The value goes as the payload of the parameter frame.
      */
     unsigned char frame[8];
-    size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX,
-                           NULL, 0);
-    if (n == 0) {
-        /* The value must be sent as payload         */
-        unsigned char v = (d == PR_DUPLEX_FULL) ? 1 : 0;
-        n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
-    }
+    unsigned char v = (d == PR_DUPLEX_FULL) ? 1 : 0;
+    size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
     if (n > 0) {
         char e2[64];
-        (void)(void)pr_tncsock_tx(&t->sock, frame, n, e2, sizeof e2);
+        (void)pr_tncsock_tx(&t->sock, frame, n, e2, sizeof e2);
     }
 
     tnc2_save(r, t);

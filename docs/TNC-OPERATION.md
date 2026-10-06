@@ -92,6 +92,12 @@ prterm.cgi --checkup  prterm.ini              # KISS active, buffers cleared
 A known-good banner is the pass criterion. If the TNC answers with `?` in the
 first bytes, it is not in host mode — go back to §2.
 
+When `prterm-tncd` is already running, `--checkup` does **not** open the port
+itself — it sends `CHECKUP` to the daemon, which repairs the link in place
+(leave KISS → probe → recovery ladder if needed → MYCALL → KISS → parameters)
+without ever closing the descriptor. Only without a daemon does it touch the
+device directly.
+
 ### 4 — Start PRTERM
 
 `prterm-tncd` first, then the CGI. The daemon holds the port; the CGI talks to

@@ -7,8 +7,10 @@
 #include "prterm_compat.h"
 
 #include "selftest.h"
+#include "kiss.h"
 #include "probe.h"
 #include "serial.h"
+#include "tncsock.h"
 #include "util.h"
 
 #include <stdarg.h>
@@ -300,6 +302,38 @@ int pr_selftest_reset(const pr_config *cfg, pr_selftest *out)
 
 
 /*
+ * KISS parameters - identical to what prterm-tncd sets when it enters
+ * KISS (docs/TNC-INIT.md section 4). Without them a TNC falls back to
+ * its EPROM values, and channel access is undefined.
+ */
+static void kiss_params(pr_serial *ser, bool full_duplex)
+{
+    static const struct { unsigned cmd; unsigned char val; } params[] = {
+        { KISS_CMD_TXDELAY,  50  },
+        { KISS_CMD_SLOTTIME, 10  },
+        { KISS_CMD_PERSIST,  255 },
+        { KISS_CMD_TXTAIL,   10  },
+    };
+    char e2[64];
+
+    for (size_t i = 0; i < sizeof params / sizeof params[0]; i++) {
+        unsigned char frame[16];
+        unsigned char v = params[i].val;
+        size_t n = kiss_encode(frame, sizeof frame, 0, params[i].cmd, &v, 1);
+        if (n > 0)
+            (void)pr_serial_write(ser, frame, n, e2, sizeof e2);
+        usleep(100000);
+    }
+
+    unsigned char frame[16];
+    unsigned char v = full_duplex ? 1 : 0;
+    size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
+    if (n > 0)
+        (void)pr_serial_write(ser, frame, n, e2, sizeof e2);
+    usleep(100000);
+}
+
+/*
  * Recovery: bring the device back into KISS mode and delete pending
  * data in memory.
  *
@@ -313,6 +347,41 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
 {
     char err[256];
     memset(out, 0, sizeof *out);
+
+    /*
+     * When prterm-tncd is running it OWNS the port: it keeps the
+     * descriptor open and holds KISS. Opening the device a second
+     * time from here is exactly the "port chaos" that tears a TNC2C
+     * out of KISS - so the daemon does the checkup in that case.
+     */
+    {
+        char sock[512];
+        snprintf(sock, sizeof sock, "%.400s/tnc-%.32s.sock",
+                 cfg->runtime_dir,
+                 cfg->active_station[0] ? cfg->active_station : "default");
+
+        pr_tncsock c;
+        char e2[256];
+        if (pr_tncsock_open(&c, sock, e2, sizeof e2) == 0) {
+            int rc = pr_tncsock_checkup(&c, e2, sizeof e2);
+            pr_tncsock_close(&c);
+            if (rc == 0) {
+                add(out, "Via prterm-tncd", PR_TEST_PASS,
+                    "the daemon holds the port and KISS");
+                add(out, "Memory", PR_TEST_PASS,
+                    "buffer flushed - no unconfirmed data left");
+                add(out, "Overall", PR_TEST_PASS,
+                    "device is in KISS mode and operational");
+                out->overall_ok = true;
+                return 0;
+            }
+            add(out, "Via prterm-tncd", PR_TEST_FAIL, "%.160s", e2);
+            add(out, "Overall", PR_TEST_FAIL,
+                "the daemon owns the port - see its log, do not open it twice");
+            out->overall_ok = false;
+            return 1;
+        }
+    }
 
     int db, par, sb;
     if (!parse_line_cfg(cfg, &db, &par, &sb)) {
@@ -364,7 +433,24 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
         add(out, "Command mode", PR_TEST_PASS, "%.110s", show);
     }
 
-    /* 4. Enter KISS - per profile       */
+    /* 4. MYCALL - without an identity the firmware does not key
+     *    the transmitter on KISS DATA at all. */
+    {
+        char e2[128];
+        unsigned char esc = 0x1B;
+        char myc[32];
+        snprintf(myc, sizeof myc, "I %.9s\r", cfg->callerid);
+        (void)pr_serial_write(&ser, &esc, 1, e2, sizeof e2);
+        (void)pr_serial_write(&ser, myc, strlen(myc), e2, sizeof e2);
+        usleep(400000);
+
+        unsigned char reply[128];
+        (void)pr_serial_read_quiet(&ser, reply, sizeof reply, 400, 150,
+                                   e2, sizeof e2);
+        add(out, "MYCALL", PR_TEST_PASS, "%.32s", cfg->callerid);
+    }
+
+    /* 5. Enter KISS - per profile       */
     {
         char e2[128];
         if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
@@ -384,6 +470,18 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
         unsigned char junk[256];
         (void)pr_serial_read_quiet(&ser, junk, sizeof junk, 250, 100,
                                    e2, sizeof e2);
+    }
+
+    /* 6. KISS parameters - channel access has to be defined      */
+    {
+        bool full = cfg->duplex == PR_DUPLEX_FULL;
+        kiss_params(&ser, full);
+        unsigned char junk[256];
+        (void)pr_serial_read_quiet(&ser, junk, sizeof junk, 250, 100,
+                                   err, sizeof err);
+        add(out, "KISS parameters", PR_TEST_PASS,
+            "TXDELAY 50, SLOTTIME 10, PERSIST 255, TXTAIL 10, FULLDUPLEX %d",
+            full ? 1 : 0);
     }
 
     add(out, "Memory", PR_TEST_PASS,

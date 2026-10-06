@@ -1,6 +1,6 @@
 /*
  * PRTERM - CB & Amateur Radio Terminal
- * tncd.c - Keeps the serial ports open and runs KISS mode.
+ * tncd.c - Keeps the serial ports open and holds KISS mode.
  *
  * Why a separate process
  * ======================
@@ -13,6 +13,25 @@
  * This daemon keeps the ports open, enters KISS once and holds it.
  * The CGI never touches the device again afterwards.
  *
+ * How KISS is held (the model of the MAX25-Stack, kiss_bridge.py)
+ * ===============================================================
+ *   - The port is opened ONCE and never closed while the daemon runs.
+ *   - KISS is entered ONCE: terminal probe, recovery ladder only when
+ *     the device is deaf or only echoes, MYCALL, KISS entry and the
+ *     KISS parameters. From then on the device speaks frames only.
+ *   - While KISS is held ONLY KISS frames are written. Every other
+ *     byte would go on the air as data - in KISS mode there are no
+ *     commands any more.
+ *   - There is no "leave KISS for transmitting". Leaving and
+ *     re-entering is what resets TheFirmware and shows up as the
+ *     start pattern in the LEDs (status + connected 2-3 s).
+ *   - Repair is the MAX25 "stabilize_session": leave KISS (a control
+ *     frame, nothing goes on the air), probe the terminal, run the
+ *     ladder when it only echoes, set MYCALL, enter KISS. The port
+ *     stays open the whole time - a DTR drop would undo the repair.
+ *   - The watch only acts when something is wrong. A held KISS is
+ *     not poked at - poking is what breaks it.
+ *
  * Layout
  * ======
  *   prterm-tncd  keeps port open  ->  TNC2C / PK-TNC2
@@ -22,10 +41,10 @@
  *
  * Commands, line by line, answer "OK ..." or "ERR ...":
  *   PING            is the daemon still alive
- *   TX <hex>        send bytes
- *   RX              fetch received bytes
+ *   TX <hex>        send one KISS frame
+ *   RX              fetch received bytes (KISS frames)
  *   STATUS          state
- *   CHECKUP         ensure KISS
+ *   CHECKUP         repair: ensure KISS mode
  *   QUIT            close connection
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -33,6 +52,7 @@
 #include "prterm_compat.h"
 
 #include "config.h"
+#include "kiss.h"
 #include "radio.h"
 #include "serial.h"
 #include "callsign.h"
@@ -48,14 +68,37 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/ioctl.h>
 #include <sys/un.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "probe.h"
+
 #define TNCD_MAX_STATIONS 4
 #define TNCD_RX_BUFFER   65536
+
+/*
+ * Host-side pacing (MAX25-Stack tx_pace.py): at least this much quiet
+ * between two frames on the air. The TNC switches the carrier with the
+ * frame itself - hammering it would only produce gaps and collisions.
+ */
+#define TNCD_MIN_TX_GAP_S 1.5
+
+/*
+ * Serial watch (MAX25-Stack max25d.py): how often the link state is
+ * looked at, and how rarely a repair may run. A held KISS needs no
+ * care - the watch exists for the case that it was lost.
+ */
+#define TNCD_WATCH_S           60
+#define TNCD_REPAIR_COOLDOWN_S 20
+
+/* KISS parameters - see docs/TNC-INIT.md section 4            */
+#define TNCD_TXDELAY  50
+#define TNCD_SLOTTIME 10
+#define TNCD_PERSIST  255   /* CB: enforced. Lower values make the
+                             * access unreliable on a busy channel. */
+#define TNCD_TXTAIL   10
 
 typedef struct tncd_station {
     char        name[32];
@@ -71,8 +114,11 @@ typedef struct tncd_station {
     unsigned char rx[TNCD_RX_BUFFER];
     size_t        rx_len;
 
-    bool        kiss_ok;
-    time_t      last_check;
+    bool        kiss_active;   /* KISS is entered and being held      */
+    char        detail[64];    /* what the watch is doing / last finding */
+    time_t      last_watch;
+    time_t      last_repair;
+    double      last_tx;       /* pacing, monotonic                   */
 } tncd_station;
 
 static volatile sig_atomic_t g_stop = 0;
@@ -83,108 +129,343 @@ static void on_signal(int sig)
     g_stop = 1;
 }
 
-/* ---- Ensure KISS        -------------------------------------------- */
+static void station_pump(tncd_station *st);
+
+/* ======================================================================= */
+/* Small helpers                                                           */
+/* ======================================================================= */
+
+static double mono_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Write and wait until the bytes have really left the interface. */
+static bool dev_write(tncd_station *st, const void *data, size_t len)
+{
+    char e2[128];
+    if (!st->open)
+        return false;
+    (void)pr_serial_hold_dtr(&st->ser, e2, sizeof e2);
+    if (pr_serial_write(&st->ser, data, len, e2, sizeof e2) != 0)
+        return false;
+    if (st->ser.fd >= 0)
+        (void)tcdrain(st->ser.fd);
+    return true;
+}
+
+/* Read and discard - leftovers from switching confuse every probe. */
+static void dev_drain(tncd_station *st, int timeout_ms, int quiet_ms)
+{
+    unsigned char junk[2048];
+    char e2[128];
+    (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk,
+                               timeout_ms, quiet_ms, e2, sizeof e2);
+}
+
+/*
+ * "The device speaks" = a firmware banner or a meaningful reply.
+ * Echo of our own probe bytes does NOT count - an echo-only TNC2C is
+ * exactly the state that has to be repaired.
+ */
+static bool device_speaks(const unsigned char *buf, size_t len)
+{
+    unsigned char tmp[2048];
+    size_t n = len < sizeof tmp ? len : sizeof tmp;
+    if (n == 0)
+        return false;
+    memcpy(tmp, buf, n);
+    n = pr_probe_strip_echo(tmp, n);
+    if (!pr_probe_has_content(tmp, n))
+        return false;
+    return pr_probe_has_banner(tmp, n) || pr_probe_score(tmp, n) > 0;
+}
+
+typedef enum dev_health {
+    DEV_SILENT = 0,    /* nothing at all - wrong port, baud, power   */
+    DEV_ALIVE  = 1,    /* terminal mode, a reply came back           */
+    DEV_ECHO   = 2     /* only mirrors - DTR was lost, ladder needed */
+} dev_health;
+
+/*
+ * ESC V (1B 56 0D) - the probe of the TNC2 class. Not INFO, not HELP.
+ */
+static dev_health probe_terminal(tncd_station *st,
+                                 unsigned char *out, size_t outcap,
+                                 size_t *outlen)
+{
+    static const unsigned char esc_v[] = { 0x1B, 'V', 0x0D };
+    char e2[128];
+
+    if (outlen != NULL)
+        *outlen = 0;
+    if (!dev_write(st, esc_v, sizeof esc_v))
+        return DEV_SILENT;
+    usleep(400000);
+
+    unsigned char buf[2048];
+    long n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 3000, 600,
+                                  e2, sizeof e2);
+    if (n <= 0)
+        return DEV_SILENT;
+
+    if (out != NULL && outcap > 0) {
+        size_t k = (size_t)n < outcap ? (size_t)n : outcap;
+        memcpy(out, buf, k);
+        if (outlen != NULL)
+            *outlen = k;
+    }
+
+    /* Pure echo of the probe? Then the terminal is not really there. */
+    unsigned char tmp[2048];
+    memcpy(tmp, buf, (size_t)n);
+    size_t k = pr_probe_strip_echo(tmp, (size_t)n);
+    if (!pr_probe_has_content(tmp, k))
+        return DEV_ECHO;
+
+    return DEV_ALIVE;
+}
+
+/* ======================================================================= */
+/* KISS parameters                                                         */
+/* ======================================================================= */
+
+static void kiss_param(tncd_station *st, unsigned cmd, unsigned char value)
+{
+    unsigned char frame[16];
+    size_t n = kiss_encode(frame, sizeof frame, 0, cmd, &value, 1);
+    if (n > 0)
+        (void)dev_write(st, frame, n);
+}
+
+/*
+ * CSMA parameters of the channel access. Without them a TNC falls back
+ * to whatever its EPROM says - that was one of the reasons why KISS
+ * "did not work" here.
+ */
+static void send_kiss_params(tncd_station *st)
+{
+    kiss_param(st, KISS_CMD_TXDELAY,  TNCD_TXDELAY);
+    usleep(100000);
+    kiss_param(st, KISS_CMD_SLOTTIME, TNCD_SLOTTIME);
+    usleep(100000);
+    kiss_param(st, KISS_CMD_PERSIST,  TNCD_PERSIST);
+    usleep(100000);
+    kiss_param(st, KISS_CMD_TXTAIL,   TNCD_TXTAIL);
+    usleep(100000);
+
+    /* FULLDUPLEX is the lever via which the hardware may do full duplex. */
+    kiss_param(st, KISS_CMD_FULLDUPLEX,
+               st->cfg.duplex == PR_DUPLEX_FULL ? 1 : 0);
+    usleep(100000);
+    dev_drain(st, 250, 100);
+}
+
+/* ESC I <call>\r - the TNC must know its own identity. KISS DATA is
+ * only keyed when MYCALL is set (MAX25 note on PTT). */
+static void set_mycall(tncd_station *st)
+{
+    char cmd[32];
+    unsigned char esc = 0x1B;
+
+    snprintf(cmd, sizeof cmd, "I %.9s\r", st->cfg.callerid);
+    (void)dev_write(st, &esc, 1);
+    (void)dev_write(st, cmd, strlen(cmd));
+    usleep(400000);
+
+    unsigned char reply[128];
+    char e2[128];
+    long n = pr_serial_read_quiet(&st->ser, reply, sizeof reply, 400, 150,
+                                  e2, sizeof e2);
+    if (n > 0 && memchr(reply, '?', 32 < (size_t)n ? 32 : (size_t)n) != NULL)
+        pr_strlcpy(st->detail, "MYCALL not accepted", sizeof st->detail);
+}
+
+/* ======================================================================= */
+/* Recovery ladder (tnc_serial_recovery.py, docs/TNC-INIT.md)              */
+/* ======================================================================= */
+
+/*
+ * Everything happens with the port OPEN - the ladder is pointless when
+ * DTR drops in between and puts the TNC2C back into echo-only.
+ *
+ * The ladder stops at the first sign of life. "ESC QRES" is a cold
+ * boot from EPROM - the mains power cycle that the manual demands is
+ * not needed.
+ */
+static bool recover_terminal(tncd_station *st)
+{
+    unsigned char buf[2048];
+    char e2[128];
+    long n;
+
+    pr_strlcpy(st->detail, "recovery ladder", sizeof st->detail);
+
+    /* 0. Passive listen - sometimes the banner is already there     */
+    n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 1500, 600,
+                             e2, sizeof e2);
+    if (n > 0 && device_speaks(buf, (size_t)n))
+        return true;
+
+    /*
+     * 1. KISS return (C0 FF C0) is DELIBERATELY not sent again here -
+     *    the caller has just sent it to leave KISS. On TheFirmware it
+     *    resets the firmware, a second one would only cost another
+     *    boot.
+     */
+
+    /* 2. Flush buffer, leave WA8DED host mode            */
+    {
+        static const unsigned char flush[] = { 0x11, 0x18 };
+        (void)dev_write(st, flush, sizeof flush);
+        usleep(200000);
+
+        unsigned char nuls[300];
+        memset(nuls, 0, sizeof nuls);
+        (void)dev_write(st, nuls, sizeof nuls);
+        usleep(150000);
+
+        static const unsigned char jhost[] = {
+            0x00, 0x01, 0x06, 'J', 'H', 'O', 'S', 'T', ' ', '0', '\r'
+        };
+        (void)dev_write(st, jhost, sizeof jhost);
+        usleep(800000);
+
+        n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 1000, 400,
+                                 e2, sizeof e2);
+        if (n > 0 && device_speaks(buf, (size_t)n))
+            return true;
+    }
+
+    /* 3. ESC V                                        */
+    if (probe_terminal(st, NULL, 0, NULL) == DEV_ALIVE)
+        return true;
+
+    /* 4. ESC QRES - cold boot from EPROM, DTR stays high      */
+    {
+        static const unsigned char qres[] = { 0x1B, 'Q', 'R', 'E', 'S', '\r' };
+        (void)dev_write(st, qres, sizeof qres);
+        n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 3000, 800,
+                                 e2, sizeof e2);
+        if (n > 0 && device_speaks(buf, (size_t)n))
+            return true;
+    }
+
+    /* 5. ESC V after the cold boot                     */
+    if (probe_terminal(st, NULL, 0, NULL) == DEV_ALIVE)
+        return true;
+
+    /* 6. ESC E 0 - echo off, then probe again          */
+    {
+        static const unsigned char eoff[] = { 0x1B, 'E', '0', '\r' };
+        (void)dev_write(st, eoff, sizeof eoff);
+        usleep(300000);
+    }
+    if (probe_terminal(st, NULL, 0, NULL) == DEV_ALIVE)
+        return true;
+
+    /* 7. Second ESC QRES + probe - the manual's "restart"        */
+    {
+        static const unsigned char qres[] = { 0x1B, 'Q', 'R', 'E', 'S', '\r' };
+        (void)dev_write(st, qres, sizeof qres);
+        n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 3000, 800,
+                                 e2, sizeof e2);
+        if (n > 0 && device_speaks(buf, (size_t)n))
+            return true;
+    }
+    if (probe_terminal(st, NULL, 0, NULL) == DEV_ALIVE)
+        return true;
+
+    /* 8. Last resort - TAPR class: "kiss off" + "INFO"           */
+    {
+        static const unsigned char tapr[] = "kiss off\rINFO\r";
+        (void)dev_write(st, tapr, sizeof tapr - 1);
+        n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 3000, 800,
+                                 e2, sizeof e2);
+        if (n > 0 && device_speaks(buf, (size_t)n))
+            return true;
+    }
+
+    pr_strlcpy(st->detail, "device does not answer", sizeof st->detail);
+    return false;
+}
+
+/* ======================================================================= */
+/* Ensure KISS - enter once, hold, repair when lost                        */
+/* ======================================================================= */
 
 /*
  * The order is crucial: leave KISS first. That is a control frame
  * and does NOT go on the air. Only then one may write commands -
  * otherwise one transmits oneself.
  */
-static bool enter_command_mode(tncd_station *st, char *err, size_t errlen)
+static bool ensure_kiss(tncd_station *st, bool force, char *err, size_t errlen)
 {
-    char e2[128];
-    (void)errlen;
+    if (!st->open) {
+        snprintf(err, errlen, "device not open");
+        return false;
+    }
 
-    /* 1. Leave KISS     */
+    /* Held and healthy - do not poke at it.               */
+    if (st->kiss_active && !force)
+        return true;
+
+    /*
+     * 1. Leave KISS. C0 FF C0 is a control frame, nothing goes on
+     *    the air. On TheFirmware it additionally resets the firmware,
+     *    which is why the boot is waited out below instead of
+     *    counting down a fixed time.
+     */
     {
         static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
-        (void)pr_serial_write(&st->ser, leave, sizeof leave, e2, sizeof e2);
+        if (!dev_write(st, leave, sizeof leave)) {
+            snprintf(err, errlen, "write to the device failed");
+            return false;
+        }
         usleep(1500000);
+        dev_drain(st, 2500, 800);
     }
 
-    /* 2. Flush buffer, leave host mode     */
-    {
-        static const unsigned char flush[] = { 0x11, 0x18 };
-        (void)pr_serial_write(&st->ser, flush, sizeof flush, e2, sizeof e2);
-        usleep(150000);
-
-        unsigned char nuls[300];
-        memset(nuls, 0, sizeof nuls);
-        (void)pr_serial_write(&st->ser, nuls, sizeof nuls, e2, sizeof e2);
-        usleep(150000);
-
-        static const unsigned char jhost[] = {
-            0x00, 0x01, 0x06, 'J', 'H', 'O', 'S', 'T', ' ', '0', '\r'
-        };
-        (void)pr_serial_write(&st->ser, jhost, sizeof jhost, e2, sizeof e2);
-        usleep(400000);
+    /* 2. Terminal probe - the ladder only when it is needed     */
+    if (probe_terminal(st, NULL, 0, NULL) != DEV_ALIVE) {
+        if (!recover_terminal(st)) {
+            st->kiss_active = false;
+            snprintf(err, errlen,
+                     "device does not answer - check port, baud rate and DTR");
+            return false;
+        }
     }
 
-    /* 3. Probe - in command mode a response must come      */
-    {
-        static const unsigned char probe[] = { 0x1B, 0x56, 0x0D };
-        (void)pr_serial_write(&st->ser, probe, sizeof probe, e2, sizeof e2);
-        usleep(400000);
+    /* 3. MYCALL - KISS DATA is only keyed with an identity     */
+    set_mycall(st);
 
-        unsigned char junk[512];
-        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 800, 200,
-                                   e2, sizeof e2);
+    /* 4. Enter KISS - per profile (docs/TNC-INIT.md section 2) */
+    if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
+        static const unsigned char kiss_on[] = "kiss on\r";
+        (void)dev_write(st, kiss_on, sizeof kiss_on - 1);
+    } else {
+        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
+        (void)dev_write(st, kiss_on, sizeof kiss_on);
     }
+    usleep(500000);
+    dev_drain(st, 300, 150);
 
-    /*
-     * 4. Set MYCALL. The TNC must know its own identity - without
-     *    that the answerback ID does not work, and some firmware
-     *    accepts no frame at all without MYCALL.
-     */
-    {
-        char myc[32];
-        snprintf(myc, sizeof myc, "%.1sI %.9s\r",
-                 "\x1b", st->cfg.callerid);
-        (void)pr_serial_write(&st->ser, myc, strlen(myc), e2, sizeof e2);
-        usleep(400000);
-        unsigned char junk[128];
-        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 400, 150,
-                                   e2, sizeof e2);
-    }
+    /* 5. KISS parameters - channel access must be defined      */
+    send_kiss_params(st);
 
-    /*
-     * 5. Permanent command mode.
-     *
-     * KISS is deliberately NOT entered. Anyone entering KISS has to
-     * leave it again for transmitting - and exactly that exit and
-     * re-entry is what triggers the firmware reset on TheFirmware
-     * and thus the start pattern in the LEDs.
-     *
-     * Instead:
-     *   TX      -> UNPROTO <dest> 0 <text>
-     *   RX      -> monitor text
-     * This way the device never has to be switched, and a reset
-     * stays the exception instead of the rule.
-     */
-    {
-        static const unsigned char mon[] = "MONITOR ON\r";
-        (void)pr_serial_write(&st->ser, mon, sizeof mon - 1, e2, sizeof e2);
-        usleep(300000);
-        unsigned char junk[256];
-        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 300, 150,
-                                   e2, sizeof e2);
-    }
-    {
-        static const unsigned char mall[] = "MALL ON\r";
-        (void)pr_serial_write(&st->ser, mall, sizeof mall - 1, e2, sizeof e2);
-        usleep(300000);
-        unsigned char junk[256];
-        (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk, 300, 150,
-                                   e2, sizeof e2);
-    }
-
-    st->kiss_ok = true;   /* here: ready for operation, not KISS */
-    st->last_check = time(NULL);
-    if (err) err[0] = '\0';
+    st->kiss_active = true;
+    st->last_repair = time(NULL);
+    pr_strlcpy(st->detail, "KISS held", sizeof st->detail);
+    if (err != NULL)
+        err[0] = '\0';
     return true;
 }
 
-/* ---- Port ---------------------------------------------------------- */
+/* ======================================================================= */
+/* Port                                                                    */
+/* ======================================================================= */
 
 static bool station_open(tncd_station *st, char *err, size_t errlen)
 {
@@ -202,115 +483,9 @@ static bool station_open(tncd_station *st, char *err, size_t errlen)
     return true;
 }
 
-/* ---- Collect reception  -------------------------------------------- */
-
-
-/*
- * Ensure DTR/RTS are asserted and wait until the transmit buffer is
- * really drained.
- *
- * Two things that were missing here:
- *   - DTR is re-asserted on EVERY write. If it drops in between, the
- *     TNC2C leaves KISS mode.
- *   - tcdrain() waits until the bytes have left the interface.
- *     Without it the caller believes the transmission is over while
- *     the TNC is still transmitting.
- */
-static void tx_prepare(pr_serial *ser)
-{
-#ifdef TIOCMGET
-    int flags = 0;
-    if (ioctl(ser->fd, TIOCMGET, &flags) == 0) {
-        flags |= TIOCM_RTS | TIOCM_DTR;
-        (void)ioctl(ser->fd, TIOCMSET, &flags);
-    }
-#else
-    (void)ser;
-#endif
-}
-
-static void tx_finish(pr_serial *ser)
-{
-    if (ser->fd >= 0)
-        (void)tcdrain(ser->fd);
-}
-
-
-/*
- * UNPROTO transmit path.
- *
- * TheFirmware (TNC2 class) often ignores KISS data frames on hybrid
- * setups, while UNPROTO from command mode switches the carrier
- * reliably. That is exactly the symptom "PTT only sometimes".
- *
- * Sequence: leave KISS -> send UNPROTO -> wait -> re-enter KISS.
- * The frame is evaluated to get destination and text; whatever else
- * is in it is dropped.
- */
-static int send_unproto(tncd_station *st, const unsigned char *frame, size_t len,
-                        char *err, size_t errlen)
-{
-    /* AX.25 UI: dest(7) src(7) Control(1) PID(1) payload      */
-    if (len < 16) {
-        snprintf(err, errlen, "frame too short");
-        return -1;
-    }
-
-    char dst[16], src[16];
-    if (!call_from_ax25(frame, dst, sizeof dst) ||
-        !call_from_ax25(frame + 7, src, sizeof src)) {
-        snprintf(err, errlen, "callsign not readable");
-        return -1;
-    }
-
-    char text[PR_MSG_TEXT];
-    size_t n = len - 16;
-    if (n >= sizeof text) n = sizeof text - 1;
-    memcpy(text, frame + 16, n);
-    text[n] = '\0';
-
-    char e2[128];
-    tx_prepare(&st->ser);
-
-    /*
-     * The device stays in command mode permanently - nothing has to
-     * be switched and thus nothing has to be reset. We only set the
-     * identity to be safe.
-     */
-    {
-        char myc[32];
-        snprintf(myc, sizeof myc, "%.1sI %.9s\r", "\x1b", st->cfg.callerid);
-        (void)pr_serial_write(&st->ser, myc, strlen(myc), e2, sizeof e2);
-        usleep(300000);
-        unsigned char jj[128];
-        (void)pr_serial_read_quiet(&st->ser, jj, sizeof jj, 300, 150, e2, sizeof e2);
-    }
-
-    /* 3. UNPROTO <dest> 0 <text> */
-    char cmd[PR_MSG_TEXT + 64];
-    int k = snprintf(cmd, sizeof cmd, "UNPROTO %.9s 0 %s\r", dst, text);
-    if (k <= 0 || (size_t)k >= sizeof cmd) {
-        snprintf(err, errlen, "message too long");
-        return -1;
-    }
-    if (pr_serial_write(&st->ser, cmd, (size_t)k, err, errlen) != 0)
-        return -1;
-    tx_finish(&st->ser);
-
-    /* 4. wait until the TNC has transmitted */
-    usleep(1200000);
-
-    /*
-     * DELIBERATELY no re-entry into KISS.
-     *
-     * The device stays in command mode permanently. If one sent ESC @K
-     * at the end, the device would be in KISS again for the next
-     * transmission - and "UNPROTO ..." would go on the air as data
-     * instead of as a command. Exactly that made the first
-     * transmission work and all following ones fail.
-     */
-    return 0;
-}
+/* ======================================================================= */
+/* Collect reception                                                       */
+/* ======================================================================= */
 
 static void station_pump(tncd_station *st)
 {
@@ -322,6 +497,17 @@ static void station_pump(tncd_station *st)
     if (n <= 0)
         return;
 
+    /*
+     * Drop-out detection: while KISS is held the device speaks frames
+     * only. A firmware banner means it rebooted or was reset - from
+     * then on every byte written would be a transmission. The repair
+     * is started by the watch or before the next frame.
+     */
+    if (st->kiss_active && pr_probe_has_banner(buf, (size_t)n)) {
+        st->kiss_active = false;
+        pr_strlcpy(st->detail, "device left KISS", sizeof st->detail);
+    }
+
     /* Make room      */
     if (st->rx_len + (size_t)n > sizeof st->rx) {
         size_t drop = st->rx_len + (size_t)n - sizeof st->rx;
@@ -332,7 +518,24 @@ static void station_pump(tncd_station *st)
     st->rx_len += (size_t)n;
 }
 
-/* ---- Commands --------------------------------------------------------- */
+/*
+ * Minimum quiet between two frames on the air. Reception keeps running
+ * while waiting - the daemon must not go deaf during the gap.
+ */
+static void tx_pace(tncd_station *st)
+{
+    double gap = mono_s() - st->last_tx;
+    while (gap < TNCD_MIN_TX_GAP_S && !g_stop) {
+        station_pump(st);
+        usleep(100000);
+        gap = mono_s() - st->last_tx;
+    }
+    st->last_tx = mono_s();
+}
+
+/* ======================================================================= */
+/* Commands                                                                */
+/* ======================================================================= */
 
 static void answer(int fd, const char *fmt, ...)
 {
@@ -378,30 +581,35 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             answer(fd, "ERR no data");
             return;
         }
-        char err[256];
-        {
-            if (send_unproto(st, data, n, err, sizeof err) != 0) {
+
+        /*
+         * ONLY KISS frames may go to the device. In KISS mode every
+         * written byte is transmitted - a stray character would key
+         * the transmitter.
+         */
+        if (n < 2 || data[0] != KISS_FEND || data[n - 1] != KISS_FEND) {
+            answer(fd, "ERR not a KISS frame");
+            return;
+        }
+
+        /* The frame is passed through unchanged - the driver has
+         * already built it (FCS included in the AX.25 sense: none,
+         * the TNC computes it). */
+        if (!st->kiss_active) {
+            char err[256];
+            if (!ensure_kiss(st, true, err, sizeof err)) {
                 answer(fd, "ERR %.200s", err);
                 return;
             }
-            answer(fd, "OK %zu (unproto)", n);
+        }
+
+        tx_pace(st);
+        if (!dev_write(st, data, n)) {
+            st->kiss_active = false;
+            pr_strlcpy(st->detail, "write failed", sizeof st->detail);
+            answer(fd, "ERR write to the device failed");
             return;
         }
-        tx_prepare(&st->ser);
-        /*
-         * Re-set PERSIST before EVERY frame. If the parameters get
-         * lost (e.g. after an unwanted reset), transmission would be
-         * unreliable otherwise.
-         */
-        {
-            unsigned char pf[4] = { 0xC0, 0x02, 255, 0xC0 };
-            (void)pr_serial_write(&st->ser, pf, 4, err, sizeof err);
-        }
-        if (pr_serial_write(&st->ser, data, n, err, sizeof err) != 0) {
-            answer(fd, "ERR %.200s", err);
-            return;
-        }
-        tx_finish(&st->ser);
         answer(fd, "OK %zu", n);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_RX)) {
@@ -415,11 +623,12 @@ static void handle_command(tncd_station *st, int fd, const char *line)
         answer(fd, "OK %s", hex);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_STATUS)) {
-        answer(fd, "OK station=%s kiss=%s open=%s port=%s",
+        answer(fd, "OK station=%s kiss=%s open=%s port=%s detail=\"%.40s\"",
                st->name,
-               st->kiss_ok ? "yes" : "no",
+               st->kiss_active ? "held" : "lost",
                st->open ? "yes" : "no",
-               st->cfg.port);
+               st->cfg.port,
+               st->detail);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_CHECKUP)) {
         if (!st->open) {
@@ -427,18 +636,20 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             return;
         }
         char err[256];
-        if (!enter_command_mode(st, err, sizeof err)) {
+        if (!ensure_kiss(st, true, err, sizeof err)) {
             answer(fd, "ERR %.200s", err);
             return;
         }
-        answer(fd, "OK");
+        answer(fd, "OK KISS held");
 
     } else {
         answer(fd, "ERR unknown command %.60s", cmd);
     }
 }
 
-/* ---- Socket --------------------------------------------------------- */
+/* ======================================================================= */
+/* Socket                                                                  */
+/* ======================================================================= */
 
 static int make_listener(const char *path, char *err, size_t errlen)
 {
@@ -476,12 +687,40 @@ static int make_listener(const char *path, char *err, size_t errlen)
     return fd;
 }
 
-/* ---- Main loop     --------------------------------------------------- */
+/* ======================================================================= */
+/* Main loop                                                               */
+/* ======================================================================= */
+
+/*
+ * The watch is the MAX25 "serial watch": look at the link every now
+ * and then, repair when it is broken - and touch nothing when KISS is
+ * held. A periodic re-entry into KISS is exactly what used to disturb
+ * transmissions and reset the firmware.
+ */
+static void station_watch(tncd_station *st)
+{
+    time_t now = time(NULL);
+
+    if (now - st->last_watch < TNCD_WATCH_S)
+        return;
+    st->last_watch = now;
+
+    if (st->kiss_active)
+        return;                       /* held - nothing to do        */
+
+    if (now - st->last_repair < TNCD_REPAIR_COOLDOWN_S)
+        return;                       /* repair is running/just ran  */
+
+    char err[256];
+    if (ensure_kiss(st, true, err, sizeof err))
+        printf("  %-10s repaired - %s\n", st->name, st->detail);
+    else
+        printf("  %-10s repair failed - %.120s\n", st->name, err);
+    fflush(stdout);
+}
 
 static int run_daemon(tncd_station *stations, size_t nst)
 {
-    char err[256];
-
     while (!g_stop) {
         struct pollfd pfd[TNCD_MAX_STATIONS * 2];
         size_t np = 0;
@@ -533,28 +772,9 @@ static int run_daemon(tncd_station *stations, size_t nst)
                     }
                 }
             }
-        }
 
-        /*
-         * Maintain KISS periodically.
-         *
-         * IMPORTANT: the re-check must NOT disturb operation.
-         * enter_kiss() takes about 3 seconds and writes to the port
-         * during that time. If that fell into a transmit sequence, that
-         * transmission was lost - one saw only single PTT instead of all.
-         *
-         * Therefore: only re-check when there has been enough quiet
-         * since the last transmission, and generally rarely. The daemon
-         * keeps the port open, so KISS is not lost by itself.
-         */
-        for (size_t i = 0; i < nst; i++) {
-            tncd_station *st = &stations[i];
-            if (!st->open)
-                continue;
-            time_t idle = time(NULL) - st->last_check;
-            if (idle > 600 && st->rx_len == 0) {
-                (void)enter_command_mode(st, err, sizeof err);
-            }
+            if (st->open)
+                station_watch(st);
         }
     }
 
@@ -567,11 +787,13 @@ static int run_daemon(tncd_station *stations, size_t nst)
     return 0;
 }
 
-/* ---- Start ----------------------------------------------------------- */
+/* ======================================================================= */
+/* Start                                                                   */
+/* ======================================================================= */
 
 static void usage(void)
 {
-    printf("prterm-tncd - keeps the TNC ports open and runs KISS\n\n");
+    printf("prterm-tncd - keeps the TNC ports open and holds KISS\n\n");
     printf("Usage:\n");
     printf("  prterm-tncd [PRTERM.INI]\n\n");
     printf("One Unix socket is created per station:\n");
@@ -634,10 +856,15 @@ int main(int argc, char **argv)
             fprintf(stderr, "ERROR %s: %s\n", st->name, err);
             continue;
         }
-        if (!enter_command_mode(st, err, sizeof err)) {
+
+        /* Enter KISS once - from here on it is only held.     */
+        if (!ensure_kiss(st, false, err, sizeof err)) {
             fprintf(stderr, "ERROR %s: %s\n", st->name, err);
-            pr_serial_close(&st->ser);
-            continue;
+            fprintf(stderr,
+                    "       the watch keeps trying every %d s\n",
+                    TNCD_WATCH_S);
+            /* The port stays OPEN - closing would drop DTR and make
+             * the repair even harder. */
         }
 
         st->listen_fd = make_listener(st->socket_path, err, sizeof err);
@@ -647,7 +874,11 @@ int main(int argc, char **argv)
             continue;
         }
 
-        printf("  %-10s KISS active, socket %s\n", st->name, st->socket_path);
+        st->last_watch = time(NULL);
+        printf("  %-10s %s, socket %s\n",
+               st->name,
+               st->kiss_active ? "KISS held" : "KISS pending",
+               st->socket_path);
         nst++;
     }
 
@@ -663,8 +894,21 @@ int main(int argc, char **argv)
     int rc = run_daemon(stations, nst);
 
     for (size_t i = 0; i < nst; i++) {
-        if (stations[i].open)
-            pr_serial_close(&stations[i].ser);
+        tncd_station *st = &stations[i];
+        if (!st->open)
+            continue;
+
+        /*
+         * Leave KISS properly - a control frame, nothing goes on the
+         * air. Then close; the device is out of operation anyway.
+         */
+        if (st->kiss_active) {
+            static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
+            (void)pr_serial_write(&st->ser, leave, sizeof leave,
+                                  err, sizeof err);
+            usleep(300000);
+        }
+        pr_serial_close(&st->ser);
     }
     pr_config_free(&base);
     return rc;
