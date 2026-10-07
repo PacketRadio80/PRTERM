@@ -190,18 +190,29 @@ typedef enum dev_health {
 } dev_health;
 
 /*
- * ESC V (1B 56 0D) - the probe of the TNC2 class. Not INFO, not HELP.
+ * The probe of the profile - the device classes do not speak the same
+ * command language:
+ *
+ *   esc   TheFirmware (Landolt TNC2C):  ESC V  (1B 56 0D)
+ *   tapr  TAPR class (PK-TNC2):        "INFO\r" - a status dump with
+ *         MYCALL, TXDELAY and friends, which is exactly what the
+ *         scoring recognises.
  */
 static dev_health probe_terminal(tncd_station *st,
                                  unsigned char *out, size_t outcap,
                                  size_t *outlen)
 {
     static const unsigned char esc_v[] = { 0x1B, 'V', 0x0D };
+    static const unsigned char info[]  = { 'I', 'N', 'F', 'O', '\r' };
     char e2[128];
+
+    bool tapr = pr_str_eq_ci(st->cfg.kiss_init, "tapr");
+    const unsigned char *probe = tapr ? info : esc_v;
+    size_t plen = tapr ? sizeof info : sizeof esc_v;
 
     if (outlen != NULL)
         *outlen = 0;
-    if (!dev_write(st, esc_v, sizeof esc_v))
+    if (!dev_write(st, probe, plen))
         return DEV_SILENT;
     usleep(400000);
 
@@ -222,6 +233,8 @@ static dev_health probe_terminal(tncd_station *st,
     unsigned char tmp[2048];
     memcpy(tmp, buf, (size_t)n);
     size_t k = pr_probe_strip_echo(tmp, (size_t)n);
+    if (tapr)
+        k = pr_probe_remove_bytes(tmp, k, info, sizeof info);
     if (!pr_probe_has_content(tmp, k))
         return DEV_ECHO;
 
@@ -263,16 +276,26 @@ static void send_kiss_params(tncd_station *st)
     dev_drain(st, 250, 100);
 }
 
-/* ESC I <call>\r - the TNC must know its own identity. KISS DATA is
- * only keyed when MYCALL is set (MAX25 note on PTT). */
+/*
+ * The TNC must know its own identity - KISS DATA is only keyed when
+ * MYCALL is set (MAX25 note on PTT). The command differs per class:
+ *
+ *   esc   TheFirmware:  ESC I <call>\r   (tfb.c Icmd)
+ *   tapr  TAPR class:   "MYCALL <call>\r"
+ */
 static void set_mycall(tncd_station *st)
 {
     char cmd[32];
-    unsigned char esc = 0x1B;
 
-    snprintf(cmd, sizeof cmd, "I %.9s\r", st->cfg.callerid);
-    (void)dev_write(st, &esc, 1);
-    (void)dev_write(st, cmd, strlen(cmd));
+    if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
+        snprintf(cmd, sizeof cmd, "MYCALL %.9s\r", st->cfg.callerid);
+        (void)dev_write(st, cmd, strlen(cmd));
+    } else {
+        unsigned char esc = 0x1B;
+        snprintf(cmd, sizeof cmd, "I %.9s\r", st->cfg.callerid);
+        (void)dev_write(st, &esc, 1);
+        (void)dev_write(st, cmd, strlen(cmd));
+    }
     usleep(400000);
 
     unsigned char reply[128];
