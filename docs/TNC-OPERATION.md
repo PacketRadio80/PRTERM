@@ -254,7 +254,15 @@ cp build/prterm.cgi build/prterm-tncd /path/to/deployment/
 
 # 5. verify (see §3 step 5): send once, then IMMEDIATELY again -
 #    the second frame is the one that catches a lost KISS
+
+# 6. Administration -> Security: set the password. While the built-in
+#    one is active the administration says so - and is open to
+#    everyone who knows that string.
 ```
+
+Two things the deployment INI keeps for itself and that must survive a
+merge: the admin `pass_hash` and whether MailboxD is enabled. Optional
+additions: `language` in `[site]` (en, de, es, pt, fr).
 
 `prterm.cgi --checkup prterm.ini` goes through the daemon when it is running
 and repairs the link in place. With a stopped daemon it touches the port
