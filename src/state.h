@@ -37,7 +37,9 @@ int  pr_log_tail(const pr_config *cfg, pr_msg *out, size_t cap, size_t *n,
                  char *err, size_t errlen);
 long pr_log_count(const pr_config *cfg);
 
-/* Advisory lock for state mutations. Pass fd to pr_state_unlock.           */
+/* Advisory lock for state mutations. Pass fd to pr_state_unlock.
+ * pr_state_save() and pr_log_append() take this lock THEMSELVES - do
+ * not hold it around those calls. */
 int  pr_state_lock(const pr_config *cfg, char *err, size_t errlen);
 void pr_state_unlock(int fd);
 

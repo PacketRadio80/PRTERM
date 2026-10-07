@@ -128,8 +128,20 @@ int pr_state_load(const pr_config *cfg, pr_rig_state *st, char *err, size_t errl
 int pr_state_save(const pr_config *cfg, const pr_rig_state *st,
                   char *err, size_t errlen)
 {
+    /*
+     * The mutation lock: several CGI processes write this file and
+     * the log. The writes themselves are atomic (temp file + rename),
+     * the lock keeps append and compaction of the log from losing a
+     * line. Taken here for exactly this write - do NOT hold the lock
+     * around this call.
+     */
+    int lfd = pr_state_lock(cfg, err, errlen);
+    if (lfd < 0)
+        return -1;
+
     ini *i = ini_new();
     if (i == NULL) {
+        pr_state_unlock(lfd);
         snprintf(err, errlen, "out of memory");
         return -1;
     }
@@ -159,6 +171,7 @@ int pr_state_save(const pr_config *cfg, const pr_rig_state *st,
     pr_state_path(cfg, path, sizeof path);
     int rc = ini_save(i, path, err, errlen);
     ini_free(i);
+    pr_state_unlock(lfd);
     return rc;
 }
 
@@ -282,18 +295,26 @@ int pr_log_append(const pr_config *cfg, const pr_msg *m, char *err, size_t errle
         return -1;
     }
 
+    /* See pr_state_save: append and compaction share this lock.     */
+    int lfd = pr_state_lock(cfg, err, errlen);
+    if (lfd < 0)
+        return -1;
+
     FILE *f = fopen(path, "ab");
     if (f == NULL) {
+        pr_state_unlock(lfd);
         snprintf(err, errlen, "log not writable: %s", path);
         return -1;
     }
     size_t w = fwrite(line, 1, (size_t)n, f);
     if (fclose(f) != 0 || w != (size_t)n) {
+        pr_state_unlock(lfd);
         snprintf(err, errlen, "log not writable: %s", path);
         return -1;
     }
 
     maybe_compact(cfg, path);
+    pr_state_unlock(lfd);
     return 0;
 }
 

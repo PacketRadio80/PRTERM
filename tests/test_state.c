@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define TESTDIR "test-runtime"
@@ -155,6 +157,58 @@ int main(void)
         int fd = pr_state_lock(&cfg, err, sizeof err);
         CHECK(fd >= 0);
         pr_state_unlock(fd);
+    }
+
+    printf("\n== concurrent writers ==\n");
+    {
+        /*
+         * Four processes append at the same time - as the UI polling
+         * and a transmission do in operation. The log may neither
+         * lose a line nor tear one apart; the mutation lock inside
+         * pr_log_append is what guarantees that.
+         */
+        enum { WRITERS = 4, PER = 25 };
+        long saved_max = cfg.max_log;
+        cfg.max_log = 10000;             /* nothing may be trimmed   */
+
+        long before = pr_log_count(&cfg);
+
+        pid_t pids[WRITERS];
+        for (int w = 0; w < WRITERS; w++) {
+            pids[w] = fork();
+            CHECK(pids[w] >= 0);
+            if (pids[w] == 0) {
+                for (int k = 0; k < PER; k++) {
+                    char text[64];
+                    snprintf(text, sizeof text, "writer %d line %d", w, k);
+                    pr_msg m = mk(PR_MSG_TX, "DL1ABC", text, 0);
+                    (void)pr_log_append(&cfg, &m, err, sizeof err);
+                }
+                _exit(0);
+            }
+        }
+        for (int w = 0; w < WRITERS; w++)
+            (void)waitpid(pids[w], NULL, 0);
+
+        CHECK_INT(pr_log_count(&cfg), before + WRITERS * PER);
+
+        pr_msg out[WRITERS * PER + 8];
+        size_t n = 0;
+        CHECK_INT(pr_log_tail(&cfg, out, WRITERS * PER + 8, &n,
+                              err, sizeof err), 0);
+        CHECK(n >= (size_t)(WRITERS * PER));
+
+        /* every line still has its shape: kind, from and text intact */
+        size_t good = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (out[i].kind == PR_MSG_TX &&
+                strcmp(out[i].from, "DL1ABC") == 0 &&
+                strncmp(out[i].text, "writer ", 7) == 0)
+                good++;
+        }
+        CHECK_INT(good, WRITERS * PER);
+
+        cfg.max_log = saved_max;
     }
 
     wipe();
