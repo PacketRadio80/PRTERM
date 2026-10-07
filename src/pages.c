@@ -9,6 +9,7 @@
 #include "pages.h"
 
 #include "admin.h"
+#include "arbiter.h"
 #include "bands.h"
 #include "callsign.h"
 #include "html.h"
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ======================================================================= */
 /* Helpers                                                                 */
@@ -174,12 +176,75 @@ static int app_tx_gate(app *a, const pr_session *sess,
     return 0;
 }
 
+/*
+ * TX arbitration: when several devices sit on the same channel, only
+ * one may transmit at a time - two carriers destroy each other (see
+ * arbiter.h). The lock has to cover the AIRTIME of the frame and not
+ * only the call: the daemon accepts the frame long before it has left
+ * the antenna.
+ */
+static void tx_hold_airtime(const pr_config *cfg, size_t textlen)
+{
+    long baud = cfg->radio_baud > 0 ? cfg->radio_baud : 1200;
+
+    /* AX.25: 16 header + info + 2 FCS, plus 2 bytes KISS framing. */
+    double sec = (double)(18 + (long)textlen) * 8.0 / (double)baud;
+
+    /* and the quiet gap the daemon keeps between frames anyway */
+    if (sec < 1.5)
+        sec = 1.5;
+
+    if (sec > 30.0)
+        sec = 30.0;
+
+    struct timespec ts;
+    ts.tv_sec  = (time_t)sec;
+    ts.tv_nsec = (long)((sec - (double)ts.tv_sec) * 1e9);
+    (void)nanosleep(&ts, NULL);
+}
+
 static int app_tx(app *a, const char *to, const char *text,
                   const pr_session *sess, char *err, size_t errlen)
 {
     if (app_tx_gate(a, sess, err, errlen) != 0)
         return -1;
-    return a->rig.vtbl->send(&a->rig, a->cfg->callerid, to, text, err, errlen);
+
+    int lock = pr_arbiter_acquire(a->cfg->runtime_dir, a->st.freq_hz,
+                                  a->cfg->callerid, 3000, err, errlen);
+    if (lock < 0)
+        return -1;
+
+    int rc = a->rig.vtbl->send(&a->rig, a->cfg->callerid, to, text,
+                               err, errlen);
+    if (rc == 0)
+        tx_hold_airtime(a->cfg, text != NULL ? strlen(text) : 0);
+    pr_arbiter_release(lock);
+    return rc;
+}
+
+/*
+ * Test carrier of the administration - a device test, not operation.
+ * It falls under the same transmit rules and the same arbitration.
+ */
+static int app_carrier_test(app *a, unsigned seconds, char *err, size_t errlen)
+{
+    if (a->rig.vtbl->carrier_test == NULL) {
+        snprintf(err, errlen, "%s",
+                 pr_tr(a->cfg->language,
+                       "this driver does not support a test carrier"));
+        return -1;
+    }
+
+    int lock = pr_arbiter_acquire(a->cfg->runtime_dir, a->st.freq_hz,
+                                  a->cfg->callerid, 3000, err, errlen);
+    if (lock < 0)
+        return -1;
+
+    int rc = a->rig.vtbl->carrier_test(&a->rig, seconds, err, errlen);
+    if (rc == 0)
+        tx_hold_airtime(a->cfg, 0);
+    pr_arbiter_release(lock);
+    return rc;
 }
 
 /* Channel for a frequency - from the rig state, not the config.
@@ -1162,9 +1227,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 json_err(res, a.err);
             } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
                 json_err(res, err);
-            } else if (a.rig.vtbl->carrier_test == NULL) {
-                json_err(res, pr_tr(cfg->language, "this driver does not support a test carrier"));
-            } else if (a.rig.vtbl->carrier_test(&a.rig, 3, err, sizeof err) != 0) {
+            } else if (app_carrier_test(&a, 3, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
                 json_ok(res);

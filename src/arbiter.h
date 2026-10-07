@@ -35,7 +35,10 @@ int  pr_arbiter_acquire(const char *runtime_dir, long freq_hz,
                         char *err, size_t errlen);
 void pr_arbiter_release(int fd);
 
-/* Asks whether a transmission is in progress. True if busy. */
+/* Asks whether a transmission is in progress. True if busy.
+ * Note: advisory locks never conflict with the holding process - the
+ * probe sees OTHER processes (which is what counts: every CGI is a
+ * process of its own), never a lock held here. */
 bool pr_arbiter_busy(const char *runtime_dir, long freq_hz,
                      char *owner, size_t ownerlen);
 

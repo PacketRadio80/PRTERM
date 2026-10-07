@@ -7,6 +7,7 @@
 #include "prterm_compat.h"
 
 #include "arbiter.h"
+#include "lang.h"
 #include "util.h"
 
 #include <errno.h>
@@ -64,7 +65,7 @@ int pr_arbiter_acquire(const char *runtime_dir, long freq_hz,
 
     int fd = open(path, O_RDWR | O_CREAT, 0600);
     if (fd < 0) {
-        snprintf(err, errlen, "cannot create TX lock: %s", strerror(errno));
+        pr_trf(err, errlen, "cannot create TX lock: %s", strerror(errno));
         return -1;
     }
 
@@ -84,10 +85,10 @@ int pr_arbiter_acquire(const char *runtime_dir, long freq_hz,
             if (k > 0) other[k] = '\0';
 
             if (other[0] != '\0')
-                snprintf(err, errlen,
+                pr_trf(err, errlen,
                          "the channel is busy - %s is transmitting", other);
             else
-                snprintf(err, errlen, "the channel is busy right now");
+                pr_trf(err, errlen, "the channel is busy right now");
             close(fd);
             return -1;
         }
@@ -122,7 +123,13 @@ bool pr_arbiter_busy(const char *runtime_dir, long freq_hz,
 
     struct flock fl;
     memset(&fl, 0, sizeof fl);
-    fl.l_type   = F_WRLCK;
+    /*
+     * F_RDLCK on a read-only descriptor - probing with F_WRLCK would
+     * fail with EBADF here and the channel would look permanently
+     * busy. A read lock is exactly the question we want to ask: does
+     * somebody hold the WRITE lock for a transmission?
+     */
+    fl.l_type   = F_RDLCK;
     fl.l_whence = SEEK_SET;
     fl.l_start  = 0;
     fl.l_len    = 0;
