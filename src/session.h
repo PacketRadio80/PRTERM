@@ -4,7 +4,12 @@
  *
  * The password hash has the form   sha256$<salt>$<hash>
  * and is created with   ./prterm.cgi --hash-password "passwort"
- * An empty pass_hash entry in the INI means: NO login possible.
+ *
+ * An empty pass_hash entry does NOT lock the administration - it
+ * activates the BUILT-IN password below, so that a fresh installation
+ * can be configured at all. The administration shows a warning as long
+ * as that is the case. Set your own hash as soon as the installation
+ * is yours.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

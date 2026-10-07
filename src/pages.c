@@ -500,6 +500,23 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
 
     pr_buf_add(out, "<div class=\"cards\">\n");
 
+    /*
+     * The built-in password is a service hatch for the FIRST
+     * installation - with it the administration is open to everyone
+     * who knows the string. Say so where the operator is, not in the
+     * locked view: a stranger must not learn that this hatch is open.
+     */
+    if (pr_auth_is_default(cfg)) {
+        pr_buf_addf(out,
+            "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
+            "<p>%s</p>\n"
+            "<p class=\"hint\">%s</p>\n"
+            "</div>\n",
+            T(cfg, "Set a password"),
+            T(cfg, "The built-in password is active - the administration is open to everyone who knows it."),
+            T(cfg, "Set your own password under Security - the built-in one is only for the first installation."));
+    }
+
     /* --- General   --- */
     pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
                      "<h2 class=\"grad\">%s</h2>\n", T(cfg, "General"));

@@ -8,6 +8,7 @@
 
 #include "session.h"
 #include "ini.h"
+#include "lang.h"
 #include "sha256.h"
 #include "state.h"
 #include "util.h"
@@ -137,14 +138,14 @@ bool pr_session_login(const pr_config *cfg, const char *user, const char *pass,
     memset(out, 0, sizeof *out);
 
     if (!cfg->admin_enabled) {
-        snprintf(err, errlen, "the admin area is locked");
+        snprintf(err, errlen, "%s", pr_trs("the admin area is locked"));
         return false;
     }
 
     /* Same message for user and password - does not reveal what was wrong.       */
     if (user == NULL || !pr_str_eq_ci(user, cfg->admin_user) ||
         !pr_auth_check_password(cfg, pass)) {
-        snprintf(err, errlen, "user or password is wrong");
+        snprintf(err, errlen, "%s", pr_trs("user or password is wrong"));
         return false;
     }
 
@@ -188,7 +189,7 @@ int pr_session_create(const pr_config *cfg, const char *user,
 
     ini *i = ini_new();
     if (i == NULL) {
-        snprintf(err, errlen, "out of memory");
+        snprintf(err, errlen, "%s", pr_trs("out of memory"));
         return -1;
     }
     ini_set(i, "session", "user", out->user);
