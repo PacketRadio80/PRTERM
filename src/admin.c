@@ -15,11 +15,14 @@
 #include "callsign.h"
 #include "html.h"
 #include "ini.h"
+#include "mailboxdsock.h"
 #include "lang.h"
 #include "radio.h"
 #include "session.h"
+#include "tncsock.h"
 #include "util.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +43,16 @@ static void json_err(pr_response *res, const char *msg)
     pr_buf_add(&res->body, "{\"ok\":false,\"error\":\"");
     pr_json_escape(&res->body, msg != NULL ? msg : "error");
     pr_buf_add(&res->body, "\"}");
+}
+
+static void json_err_fmt(pr_response *res, const char *fmt, ...)
+{
+    char buf[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    json_err(res, buf);
 }
 
 /* Saves the INI and keeps the model consistent.      */
@@ -381,6 +394,86 @@ static void act_ban_del(pr_request *req, pr_response *res, pr_config *cfg)
     if (persist(cfg, res)) json_ok(res);
 }
 
+/*
+ * Forward a /usercreate call to MailboxD over the prterm<->mailboxd
+ * unix-domain socket.
+ *
+ * The form posts: name (username), full, country, location, email.
+ * The MailboxD plugin-side `/usercreate` command takes exactly those
+ * five args in the same order (see mailboxd/src/core/command.c).
+ *
+ * If the link is not up the action reports a JSON error and the page
+ * stays on the user-management card. The admin still gets a useful
+ * hint, not a generic warning.
+ */
+static void act_mbox_usercreate(pr_request *req, pr_response *res,
+                                pr_config *cfg, pr_session *sess)
+{
+    (void)sess;
+    if (!cfg->mailboxd_enabled) {
+        json_err(res, pr_tr(cfg->language, "MailboxD is disabled in prterm.ini"));
+        return;
+    }
+    const char *name     = arg(req, "name");
+    const char *full     = arg(req, "full");
+    const char *country  = arg(req, "country");
+    const char *location = arg(req, "location");
+    const char *email    = arg(req, "email");
+    if (name[0] == '\0' || full[0] == '\0') {
+        json_err(res, pr_tr(cfg->language, "name and full are required"));
+        return;
+    }
+
+    char sock[PR_CFG_PATH];
+    snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+
+    pr_mailboxdsock m;
+    char err[256];
+    if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0) {
+        json_err_fmt(res, "mailboxd link down: %s", err);
+        return;
+    }
+    char banner[64];
+    if (pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err) != 0) {
+        pr_mailboxdsock_close(&m);
+        json_err_fmt(res, "mailboxd HELLO: %s", err);
+        return;
+    }
+    /*
+     * Build the /usercreate line for MailboxD. 5 positional args:
+     * username, full-name, country, location, email. The MailboxD
+     * command dispatcher is responsible for privilege checking
+     * (Sysop/Admin only). Without a Sysop login, MailboxD replies
+     * END err dispatch-failed--7 (MAILBOXD_ERR_DENIED) and we map
+     * that to a JSON "permission denied" so the admin can see why.
+     */
+    char cmdline[1024];
+    int n = snprintf(cmdline, sizeof cmdline,
+                     "/usercreate %s %s %s %s %s",
+                     name, full, country, location, email);
+    if (n < 0 || (size_t)n >= sizeof cmdline) {
+        pr_mailboxdsock_close(&m);
+        json_err(res, pr_tr(cfg->language, "input too long"));
+        return;
+    }
+
+    char out[4096];
+    size_t lines = 0;
+    int rc = pr_mailboxdsock_run(&m, cmdline, out, sizeof out, &lines,
+                                 err, sizeof err);
+    pr_mailboxdsock_close(&m);
+    if (rc != 0) {
+        if (strstr(err, "dispatch-failed--7") != NULL) {
+            json_err(res, pr_tr(cfg->language,
+                "mailboxd refused: Sysop/Admin login required (link_token not yet bound to a Sysop user)"));
+        } else {
+            json_err(res, err);
+        }
+        return;
+    }
+    json_ok(res);
+}
+
 static void act_pass_change(pr_request *req, pr_response *res, pr_config *cfg,
                             pr_session *sess)
 {
@@ -441,6 +534,224 @@ static void act_pass_change(pr_request *req, pr_response *res, pr_config *cfg,
  */
 
 /* ======================================================================= */
+/* MailboxD bridge — public actions (no admin session required)            */
+/* ======================================================================= */
+
+/* Hex-encode a NUL-terminated string. */
+static size_t hex_enc(const char *src, char *dst, size_t dstlen)
+{
+    static const char hx[] = "0123456789abcdef";
+    size_t w = 0;
+    for (const unsigned char *p = (const unsigned char *)src; *p; p++) {
+        if (w + 2 >= dstlen) break;
+        dst[w++] = hx[*p >> 4];
+        dst[w++] = hx[*p & 0x0f];
+    }
+    dst[w] = '\0';
+    return w;
+}
+
+/* Hex-decode a hex string into raw bytes. */
+static size_t hex_dec(const char *src, char *dst, size_t dstlen)
+{
+    size_t w = 0;
+    int hi = -1;
+    for (const char *p = src; *p; p++) {
+        int v = -1;
+        if (*p >= '0' && *p <= '9') v = *p - '0';
+        else if (*p >= 'a' && *p <= 'f') v = *p - 'a' + 10;
+        else if (*p >= 'A' && *p <= 'F') v = *p - 'A' + 10;
+        if (v < 0) continue;
+        if (hi < 0) { hi = v; continue; }
+        if (w + 1 >= dstlen) break;
+        dst[w++] = (char)((hi << 4) | v);
+        hi = -1;
+    }
+    dst[w] = '\0';
+    return w;
+}
+
+/* Append a newline-separated output buffer as a JSON string array.
+ * Each line in `out` is appended as a JSON-escaped element. */
+static void json_lines_array(pr_buf *b, const char *out)
+{
+    const char *p = out;
+    int n = 0;
+    while (*p) {
+        const char *nl = strchr(p, '\n');
+        size_t len = nl ? (size_t)(nl - p) : strlen(p);
+        /* Skip empty trailing line. */
+        if (len == 0 && !nl) break;
+        if (n > 0) pr_buf_addc(b, ',');
+        pr_buf_addc(b, '"');
+        char tmp[1024];
+        size_t cplen = len < sizeof(tmp)-1 ? len : sizeof(tmp)-1;
+        memcpy(tmp, p, cplen);
+        tmp[cplen] = '\0';
+        pr_json_escape(b, tmp);
+        pr_buf_addc(b, '"');
+        n++;
+        p += len + (nl ? 1 : 0);
+    }
+}
+
+int pr_mbox_probe_linked(const pr_config *cfg)
+{
+    if (!cfg->mailboxd_enabled)
+        return 0;
+    char sock[PR_CFG_PATH];
+    snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+    pr_mailboxdsock m;
+    char err[256];
+    if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0)
+        return 0;
+    char banner[64];
+    int ok = (pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err) == 0);
+    pr_mailboxdsock_close(&m);
+    return ok;
+}
+
+void pr_mbox_login(pr_request *req, pr_response *res, pr_config *cfg)
+{
+    if (!cfg->mailboxd_enabled) {
+        json_err(res, pr_tr(cfg->language, "MailboxD is disabled in prterm.ini"));
+        return;
+    }
+    const char *user = arg(req, "user");
+    const char *pass = arg(req, "pass");
+    if (user[0] == '\0' || pass[0] == '\0') {
+        json_err(res, pr_tr(cfg->language, "enter user and password"));
+        return;
+    }
+
+    char sock[PR_CFG_PATH];
+    snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+    pr_mailboxdsock m;
+    char err[256];
+    if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0) {
+        json_err_fmt(res, "mailboxd link down: %s", err);
+        return;
+    }
+    char banner[64];
+    if (pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err) != 0) {
+        json_err_fmt(res, "mailboxd HELLO: %s", err);
+        pr_mailboxdsock_close(&m);
+        return;
+    }
+
+    char logincmd[256];
+    snprintf(logincmd, sizeof logincmd, "/login %s %s", user, pass);
+    char out[4096];
+    size_t lines = 0;
+    int rc = pr_mailboxdsock_run(&m, logincmd, out, sizeof out, &lines, err, sizeof err);
+    pr_mailboxdsock_close(&m);
+    if (rc != 0) {
+        json_err(res, err);
+        return;
+    }
+
+    /* Check if login actually succeeded.  MailboxD's /login command
+     * outputs "Hello, <user>." on success, "Invalid password." or
+     * "Unknown user." on failure.  The RUN itself returns rc=0 in
+     * both cases (the command was dispatched). */
+    if (lines == 0 || strncmp(out, "Hello", 5) != 0) {
+        /* Extract first line as error message. */
+        char firstline[256];
+        const char *nl = strchr(out, '\n');
+        size_t len = nl ? (size_t)(nl - out) : strlen(out);
+        if (len >= sizeof firstline) len = sizeof firstline - 1;
+        memcpy(firstline, out, len);
+        firstline[len] = '\0';
+        json_err(res, firstline);
+        return;
+    }
+
+    /* Store hex-encoded credentials as cookies (HTTP-only). */
+    char hu[256];
+    char hp[256];
+    hex_enc(user, hu, sizeof hu);
+    hex_enc(pass, hp, sizeof hp);
+    pr_response_set_cookie(res, "MBOX_U", hu, 86400 * 30, true);
+    pr_response_set_cookie(res, "MBOX_P", hp, 86400 * 30, true);
+
+    /* Return the login output to the frontend. */
+    pr_response_json(res, 200);
+    pr_buf_add(&res->body, "{\"ok\":true,\"lines\":[");
+    json_lines_array(&res->body, out);
+    pr_buf_add(&res->body, "]}");
+}
+
+void pr_mbox_run(pr_request *req, pr_response *res, pr_config *cfg)
+{
+    if (!cfg->mailboxd_enabled) {
+        json_err(res, pr_tr(cfg->language, "MailboxD is disabled in prterm.ini"));
+        return;
+    }
+    const char *cmd = arg(req, "cmd");
+    if (cmd[0] != '/') {
+        json_err(res, pr_tr(cfg->language, "command must start with /"));
+        return;
+    }
+
+    char sock[PR_CFG_PATH];
+    snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+    pr_mailboxdsock m;
+    char err[256];
+    if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0) {
+        json_err_fmt(res, "mailboxd link down: %s", err);
+        return;
+    }
+    char banner[64];
+    if (pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err) != 0) {
+        json_err_fmt(res, "mailboxd HELLO: %s", err);
+        pr_mailboxdsock_close(&m);
+        return;
+    }
+
+    /* Silent re-login if cookies present. */
+    char mbox_u_enc[256];
+    char mbox_p_enc[256];
+    if (pr_req_cookie(req, "MBOX_U", mbox_u_enc, sizeof mbox_u_enc) &&
+        pr_req_cookie(req, "MBOX_P", mbox_p_enc, sizeof mbox_p_enc) &&
+        mbox_u_enc[0] && mbox_p_enc[0]) {
+        char user[128];
+        char pass[128];
+        hex_dec(mbox_u_enc, user, sizeof user);
+        hex_dec(mbox_p_enc, pass, sizeof pass);
+        char logincmd[256];
+        snprintf(logincmd, sizeof logincmd, "/login %s %s", user, pass);
+        char lout[2048];
+        pr_mailboxdsock_run(&m, logincmd, lout, sizeof lout, NULL, err, sizeof err);
+    }
+
+    char out[4096];
+    size_t nlines = 0;
+    int rc = pr_mailboxdsock_run(&m, cmd, out, sizeof out, &nlines, err, sizeof err);
+    pr_mailboxdsock_close(&m);
+
+    pr_response_json(res, 200);
+    pr_buf_add(&res->body, "{\"ok\":");
+    pr_buf_add(&res->body, rc == 0 ? "true" : "false");
+    if (rc == 0) {
+        pr_buf_add(&res->body, ",\"lines\":[");
+        json_lines_array(&res->body, out);
+        pr_buf_add(&res->body, "]}");
+    } else {
+        pr_buf_add(&res->body, ",\"error\":\"");
+        pr_json_escape(&res->body, err);
+        pr_buf_add(&res->body, "\"}");
+    }
+}
+
+void pr_mbox_logout(pr_request *req, pr_response *res)
+{
+    (void)req;
+    pr_response_clear_cookie(res, "MBOX_U");
+    pr_response_clear_cookie(res, "MBOX_P");
+    json_ok(res);
+}
+
+/* ======================================================================= */
 /* Dispatcher                                                              */
 /* ======================================================================= */
 
@@ -462,6 +773,7 @@ int pr_admin_action(pr_request *req, pr_response *res,
     else if (strcmp(action, "ban_add")      == 0) act_ban_add(req, res, cfg);
     else if (strcmp(action, "ban_del")      == 0) act_ban_del(req, res, cfg);
     else if (strcmp(action, "pass_change")  == 0) act_pass_change(req, res, cfg, sess);
+    else if (strcmp(action, "mbox_usercreate") == 0) act_mbox_usercreate(req, res, cfg, sess);
     /* action=config_save REMOVED: see comment above act_config_save. */
     else json_err(res, pr_tr(cfg->language, "unknown action"));
 

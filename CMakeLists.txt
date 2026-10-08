@@ -116,6 +116,8 @@ set(PRTERM_CORE_SOURCES
     src/admin.c
     src/selftest.c
     src/tncsock.c
+    src/mailboxdsock.c
+    src/inieditor.c
     src/pages.c
     "${PRTERM_CSS_SRC}"
     "${PRTERM_JS_SRC}")

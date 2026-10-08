@@ -376,6 +376,7 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 .ln-sys     { color: var(--fg-dim); font-style: italic; }
 .ln-warn    { color: var(--warn); }
 .ln-err     { color: var(--err); }
+.ln-cmd     { color: var(--accent); }
 .ln-banned  { color: var(--banned); text-decoration: line-through; opacity: .75; }
 .ln .db {
   color: var(--fg-faint);
@@ -667,4 +668,11 @@ td .btn { padding: 1px 8px; font-size: .88em; }
 .mbox-login .call-input:focus {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
+}
+
+/* Mailbox inputs must not be uppercased — BBS accounts and commands
+ * use mixed case. Override the global .call-input text-transform. */
+.mbox-login .call-input,
+.view-invert .txbar .call-input {
+  text-transform: none;
 }

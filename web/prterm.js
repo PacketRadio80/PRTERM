@@ -101,9 +101,14 @@
   /* ----------------------------------------------------------------------
      Mailbox (MailboxD) — local mailbox and BBS, rendered inverted.
 
-     MailboxD is a separate daemon. This is only PRTERM's view onto it: the
-     tab strip, the local mailbox login and the administration button. The
-     link to the daemon itself is a separate step.
+     MailboxD is a separate daemon.  The Mailbox tab in the topbar is
+     rendered only when [mailboxd] enabled=yes in prterm.ini.  The tab
+     has three logical states, derived from `action=state` returning
+     "mailboxd_status":
+       disabled  — the feature is off in INI; the tab is not rendered.
+       unlinked  — the INI is on, but MailboxD is not reached.
+       linked    — the link to MailboxD is up.  The terminal becomes
+                   a real BBX surface (login + /command).
      ---------------------------------------------------------------------- */
   function mboxPanel(name) {
     qsa("[data-mbox]").forEach(function (x) {
@@ -121,20 +126,120 @@
     el.hidden = !msg;
   }
 
-  function mboxNotConnected() {
-    mboxFlash(L("MailboxD is not connected — the daemon is not linked yet."), "warn");
+  /* Append one or more text lines to #mbox-term as log spans. */
+  function mboxAppend(lines, cls) {
+    var term = $("mbox-term");
+    if (!term) return;
+    cls = cls || "ln ln-sys";
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      var span = document.createElement("span");
+      span.className = cls;
+      span.textContent = lines[i] + "\n";
+      term.appendChild(span);
+    }
+    term.scrollTop = term.scrollHeight;
+  }
+
+  /* Render unlinked diagnostics once (not on every poll tick). */
+  function mboxShowUnlinked() {
+    var term = $("mbox-term");
+    if (!term) return;
+    term.innerHTML = "";
+    mboxAppend([
+      L("MailboxD is enabled in prterm.ini, but the link is not up."),
+      L("Check that MailboxD is installed, running, and that the"),
+      L("[transport.mailboxd_prterm] link_token in mailboxd.ini matches"),
+      L("[mailboxd] link_token in prterm.ini."),
+      ""
+    ], "ln ln-warn");
+  }
+
+  /* Render "linked" welcome once when connection established. */
+  function mboxShowLinked() {
+    var term = $("mbox-term");
+    if (!term) return;
+    /* Don't wipe real conversation — only set welcome if terminal
+     * is empty or only has the unlinked diagnostic. */
+    var hasRealContent = term.querySelector(".ln-sys .ln-cmd") ||
+                        term.querySelector(".ln-rx") ||
+                        term.querySelector(".ln-tx");
+    if (hasRealContent) return;
+    term.innerHTML = "";
+    mboxAppend([
+      L("MailboxD is linked."),
+      L("Log in with your MailboxD account, or use the /command line."),
+      L("The terminal accepts text commands; /help lists them."),
+      ""
+    ], "ln ln-sys");
+  }
+
+  /* Edge-trigger: only update the mailbox terminal on *transitions*. */
+  function mboxHandleStatus(prev, cur) {
+    if (cur === "disabled") return; /* tab not visible */
+    if (prev === cur) return;        /* no change            */
+    if (cur === "linked") mboxShowLinked();
+    else mboxShowUnlinked();
   }
 
   function sendMailboxCmd() {
     var i = $("mbox-cmd");
     if (!i) return;
-    if (!i.value.trim()) return;
-    mboxNotConnected();
+    var cmd = i.value.trim();
+    if (!cmd) return;
     i.value = "";
+
+    /* Intercept /logout, /quit, /bye locally — clear cookies and
+     * show the login form again. */
+    if (/^\/(logout|quit|bye)\b/i.test(cmd)) {
+      post({ action: "mbox_logout" }, function () {
+        mboxAppend([cmd], "ln ln-cmd");
+        mboxAppend([L("Logged out.")], "ln ln-sys");
+        mboxPanel("login");
+      });
+      return;
+    }
+
+    /* Echo the command locally. */
+    mboxAppend([cmd], "ln ln-cmd");
+
+    post({ action: "mbox_run", cmd: cmd }, function (j) {
+      if (!j) {
+        mboxAppend([L("request failed")], "ln ln-err");
+        return;
+      }
+      if (j.ok && j.lines && j.lines.length) {
+        mboxAppend(j.lines, "ln ln-sys");
+      } else if (!j.ok && j.error) {
+        mboxAppend([j.error], "ln ln-err");
+      }
+    });
   }
 
-  function mboxLoginSubmit() {
-    mboxNotConnected();
+  function mboxLoginSubmit(ev) {
+    if (ev) ev.preventDefault();
+    var uEl = $("mbox-user"), pEl = $("mbox-pass");
+    if (!uEl || !pEl) return;
+    var u = uEl.value.trim(), p = pEl.value;
+    if (!u || !p) {
+      mboxFlash(L("enter user and password"), "warn");
+      return;
+    }
+    post({ action: "mbox_login", user: u, pass: p }, function (j) {
+      if (!j) {
+        mboxFlash(L("request failed"), "err");
+        return;
+      }
+      if (j.ok) {
+        mboxFlash("");
+        pEl.value = "";
+        mboxPanel("term");
+        if (j.lines && j.lines.length) mboxAppend(j.lines, "ln ln-sys");
+        $("mbox-cmd").focus();
+      } else {
+        mboxFlash((j && j.error) || L("login failed"), "err");
+      }
+    });
   }
 
   /* ----------------------------------------------------------------------
@@ -391,6 +496,11 @@
         S.loggedIn = !!j.logged_in;
         renderState(j);
         if (j.callerid !== undefined) S.callerid = j.callerid;
+        if (j.mailboxd_status !== undefined) {
+          var prev = S.mbox_status;
+          S.mbox_status = j.mailboxd_status;
+          mboxHandleStatus(prev, S.mbox_status);
+        }
         if (j.messages && j.messages.length) {
           /* Remember what we know - otherwise the client appends the same
            * message again on every poll. */
@@ -470,7 +580,7 @@
     if (mboxLogin) {
       mboxLogin.addEventListener("submit", function (e) {
         e.preventDefault();
-        mboxLoginSubmit();
+        mboxLoginSubmit(e);
       });
     }
 

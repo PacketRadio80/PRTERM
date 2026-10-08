@@ -13,6 +13,7 @@
 #include "bands.h"
 #include "callsign.h"
 #include "html.h"
+#include "inieditor.h"
 #include "lang.h"
 #include "state.h"
 #include "util.h"
@@ -518,7 +519,7 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
 
     pr_buf_addf(out,
         "  <nav class=\"nav\">\n"
-        "    <button type=\"button\" data-mbox=\"admin\">%s</button>\n"
+        "    <button type=\"button\" data-goto=\"admin\">%s</button>\n"
         "  </nav>\n</header>\n", T(cfg, "Administration"));
 
     /* Mailbox output - same treatment as the radio terminal */
@@ -887,6 +888,78 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
      * Edit prterm.ini with ./prterm-ini (set / del / has-section) or
      * with your editor; it stays canonical. */
 
+    /* --- PRTERM .ini editor (full-window; the textarea is rendered
+     * separately by action=ini_editor). The link here is a nav
+     * shortcut - the operator opens the editor in a new tab. */
+    pr_buf_addf(out, "<form class=\"card\" method=\"get\" action=\"\">"
+                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "PRTERM .ini"));
+    pr_buf_add(out, "<p class=\"hint\">");
+    pr_buf_addf(out, "%s: <code>%s</code><br>", T(cfg, "File"), cfg->ini_path);
+    pr_buf_addf(out, "%s: %s</p>", T(cfg, "Open the editor"),
+                T(cfg, "Read the whole file, edit, then Save or Dismiss."));
+    pr_buf_addf(out,
+        "<div class=\"card-actions\">"
+        "<a class=\"btn\" target=\"_blank\" href=\"?action=ini_editor&amp;target=prterm\">%s</a>"
+        "</div></form>\n", T(cfg, "Open editor"));
+
+    /* --- MailboxD card: editor + user management ---
+     *
+     * This is the only MailboxD interface in the PRTERM admin area.
+     * The editor and the user-management form are independent;
+     * the editor opens in a new tab via the link.
+     */
+    {
+        pr_buf_addf(out, "<form class=\"card\" method=\"get\" action=\"\">"
+                        "<h2 class=\"grad\">%s</h2>\n", T(cfg, "MailboxD"));
+        pr_buf_addf(out, "<p class=\"hint\">");
+        if (cfg->mailboxd_enabled) {
+            char sock[PR_CFG_PATH];
+            snprintf(sock, sizeof sock, "%s/prterm.sock",
+                     cfg->mailboxd_dir);
+            pr_buf_addf(out, "%s: <code>%s/mailboxd.ini</code><br>",
+                        T(cfg, "File"), cfg->mailboxd_dir);
+            pr_buf_addf(out, "%s: <code>%s</code><br>", T(cfg, "Link socket"), sock);
+        } else {
+            pr_buf_addf(out, "%s: %s<br>",
+                        T(cfg, "Status"),
+                        T(cfg, "MailboxD is not enabled in this prterm.ini."));
+        }
+        pr_buf_addf(out, "%s: %s</p>",
+                    T(cfg, "Open the editor"),
+                    T(cfg, "Read the whole file, edit, then Save or Dismiss."));
+        pr_buf_addf(out,
+            "<div class=\"card-actions\">"
+            "<a class=\"btn\" target=\"_blank\" href=\"?action=ini_editor&amp;target=mailboxd\">%s</a>"
+            "</div></form>\n", T(cfg, "Open editor"));
+    }
+
+    /* --- MailboxD user management card --- */
+    {
+        pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
+                        "<h2 class=\"grad\">%s</h2>\n",
+                    T(cfg, "MailboxD user management"));
+        html_input_hidden(out, "action", "mbox_usercreate");
+        html_csrf(out, sess);
+        pr_buf_addf(out, "<p class=\"hint\">%s</p>",
+                    T(cfg, "Create a new user. The MailboxD /usercreate "
+                       "command requires Sysop/Admin privilege - the link "
+                       "must be authenticated as such for the call to succeed."));
+        html_input_text(out, "name", "", "DL1ABC-1",
+                        T(cfg, "Username"), "");
+        html_input_text(out, "full", "", "Sample User",
+                        T(cfg, "Full name"), "");
+        html_input_text(out, "country", "", "DE",
+                        T(cfg, "Country"), "");
+        html_input_text(out, "location", "", "MGH",
+                        T(cfg, "Location"), "");
+        html_input_text(out, "email", "", "user@example.com",
+                        T(cfg, "Email"), "");
+        pr_buf_addf(out, "<div class=\"card-actions\">"
+                        "<button type=\"submit\" class=\"primary\">%s</button>"
+                        "</div></form>\n",
+                    T(cfg, "Create user"));
+    }
+
     /* --- Session --- */
     pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
                     "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Session"));
@@ -1078,6 +1151,16 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
     if (!rig_started && a->err[0] != '\0')
         json_kv_str(b, "rig_error", a->err);
 
+    /*
+     * MailboxD status — live probe via HELLO on the bridge socket.
+     *   "disabled" — feature turned off in INI
+     *   "unlinked" — enabled, but MailboxD not reachable
+     *   "linked"   — MailboxD bridge responds to HELLO
+     */
+    json_kv_str(b, "mailboxd_status",
+                !cfg->mailboxd_enabled ? "disabled"
+                : pr_mbox_probe_linked(cfg) ? "linked" : "unlinked");
+
     pr_buf_add(b, ",\"messages\":[");
     size_t nout = 0;
     for (size_t i = 0; i < nmsg; i++) {
@@ -1130,6 +1213,40 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
     /* The language of this request - layers without a configuration
      * (band plan, drivers) translate their messages with pr_trs(). */
     pr_lang_set(cfg->language);
+
+    /* ---- INI editor (early route - no rig state needed) -------- */
+    if (action != NULL && strcmp(action, "ini_editor") == 0) {
+        const char *target = pr_req_param(req, "target");
+        const char *flash  = pr_req_param(req, "flash");
+        pr_inieditor_render(res, cfg, NULL, target, flash);
+        return 0;
+    }
+    if (action != NULL && strcmp(action, "ini_editor_save") == 0) {
+        pr_session sess;
+        pr_session_from_request(cfg, req, &sess);
+        if (!sess.valid) {
+            json_err(res, pr_tr(cfg->language, "login required"));
+            return 0;
+        }
+        const char *target = pr_req_param(req, "target");
+        char err[256];
+        char flash[128];
+        if (pr_inieditor_save(req, res, cfg, target, flash, sizeof flash,
+                              err, sizeof err) != 0) {
+            /* Re-render the editor with the parse error as flash. */
+            pr_inieditor_render(res, cfg, &sess, target, err);
+            return 0;
+        }
+        /* Redirect back to the editor with a flash string. The CGI
+         * path is the same as our request so the Location is fine. */
+        char loc[1024];
+        snprintf(loc, sizeof loc,
+                 "?action=ini_editor&target=%s&flash=%s",
+                 target ? target : "",
+                 flash);
+        pr_response_redirect(res, 302, loc);
+        return 0;
+    }
 
     /* ---- Font file    ------------------------------------------------ */
     if (action != NULL && strcmp(action, "font") == 0) {
@@ -1375,10 +1492,28 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             return 0;
         }
 
+        /* ---- MailboxD bridge (public, no admin session required) --- */
+        if (strcmp(action, "mbox_login") == 0) {
+            pr_mbox_login(req, res, cfg);
+            app_stop(&a);
+            return 0;
+        }
+        if (strcmp(action, "mbox_run") == 0) {
+            pr_mbox_run(req, res, cfg);
+            app_stop(&a);
+            return 0;
+        }
+        if (strcmp(action, "mbox_logout") == 0) {
+            pr_mbox_logout(req, res);
+            app_stop(&a);
+            return 0;
+        }
+
         /* ---- Configuration ------------------------------------------- */
         if (pr_starts_with(action, "save_") ||
             pr_starts_with(action, "ban_") ||
-            strcmp(action, "pass_change") == 0) {
+            strcmp(action, "pass_change") == 0 ||
+            strcmp(action, "mbox_usercreate") == 0) {
 
             /* Note: action=config_save was here before - now removed.
              * The raw INI textarea dump is gone from admin; the operator
