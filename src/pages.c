@@ -546,16 +546,16 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
         T(cfg, "User:"), T(cfg, "Password:"), T(cfg, "Log in"));
     pr_buf_add(out, "</form>\n");
 
-    /* Command line */
+    /* Command line — same layout as the main terminal's send bar. */
     pr_buf_addf(out,
         "<form class=\"txbar\" id=\"mbox-form\" autocomplete=\"off\">\n"
-        "  <label class=\"call-lbl\" for=\"mbox-cmd\">CMD:</label>\n"
-        "  <input class=\"call-input\" type=\"text\" id=\"mbox-cmd\" "
-        "name=\"cmd\" spellcheck=\"false\" autocapitalize=\"off\" "
-        "autocomplete=\"off\" enterkeyhint=\"send\" "
-        "placeholder=\"%s\">\n"
-        "  <button type=\"submit\" class=\"btn\">%s</button>\n"
-        "</form>\n", T(cfg, "mailbox command"), T(cfg, "Send"));
+        "  <input class=\"tx-input\" type=\"text\" id=\"mbox-cmd\" "
+        "name=\"cmd\" placeholder=\"%s\" "
+        "enterkeyhint=\"send\" spellcheck=\"false\" "
+        "autocapitalize=\"off\" autocomplete=\"off\">\n"
+        "  <button type=\"submit\" class=\"primary\">%s</button>\n"
+        "</form>\n",
+        T(cfg, "Enter command \u2026  [Enter] to send"), T(cfg, "Send"));
 
     pr_buf_add(out, "</section>\n");
 }

@@ -670,9 +670,9 @@ td .btn { padding: 1px 8px; font-size: .88em; }
   outline-offset: 1px;
 }
 
-/* Mailbox inputs must not be uppercased — BBS accounts and commands
- * use mixed case. Override the global .call-input text-transform. */
-.mbox-login .call-input,
-.view-invert .txbar .call-input {
+/* Mailbox inputs must not be uppercased — BBS accounts and
+ * commands use mixed case. Override the global .call-input
+ * text-transform for the login fields. */
+.mbox-login .call-input {
   text-transform: none;
 }
