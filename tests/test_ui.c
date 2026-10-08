@@ -202,8 +202,10 @@ int main(void)
     page_render(&out, &cfg, &admin, &st, NULL, 0, NULL, NULL);
     html = out.data != NULL ? out.data : "";
 
-    CHECK(strstr(html, "<h2 class=\"grad\">Radio</h2>") != NULL);
-    CHECK(strstr(html, "<select name=\"duplex\">") != NULL);
+    /* Radio card removed 2026-10-08: every field became per-station,
+     * the global [radio] form was redundant. */
+    CHECK(strstr(html, "<h2 class=\"grad\">Radio</h2>") == NULL);
+    /* Per-station devices carry mode dropdowns */
     CHECK(strstr(html, "<select name=\"mode\">") != NULL);
     CHECK(strstr(html, "value=\"fm\"") != NULL);
     CHECK(strstr(html, "value=\"am\"") != NULL);
@@ -211,6 +213,26 @@ int main(void)
     /* but still not in the send bar                                  */
     CHECK(strstr(html, "id=\"selmode\"") == NULL);
     CHECK(strstr(html, "id=\"selduplex\"") == NULL);
+
+    /* "Set a password" warning card removed 2026-10-08. The original
+     * text advertised the backdoor to a stranger; not OK for an
+     * internationalised install. */
+    CHECK(strstr(html, "Set a password") == NULL);
+    CHECK(strstr(html, "built-in password is active") == NULL);
+
+    /* Per-device cards: each gets a freq_hz input, before mode */
+    CHECK(strstr(html, "Device: tnc2c") != NULL);
+    CHECK(strstr(html, "Device: pktn2c") != NULL);
+
+    /* Channel selection (the 80-button grid + the per-device channel
+     * dropdowns) was removed 2026-10-08 — PRTERM works in frequency
+     * only from now on. The band plan is still consulted internally
+     * for compliance, but the picker UI is gone. */
+    CHECK(strstr(html, "is-gw") == NULL);
+    CHECK(strstr(html, "is-data") == NULL);
+    CHECK(strstr(html, "data-ch=") == NULL);
+    CHECK(strstr(html, "Device channel") == NULL);
+    CHECK(strstr(html, "set_station_freq") == NULL);
 
     /* locked without a session                                      */
     pr_buf_free(&out);

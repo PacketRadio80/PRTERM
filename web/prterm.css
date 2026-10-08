@@ -561,8 +561,8 @@ td .btn { padding: 1px 8px; font-size: .88em; }
   background-image: linear-gradient(180deg, var(--accent-2), var(--accent));
   color: #f2f6fc;
 }
-.ch.is-gw::after   { content: "\2217"; color: var(--accent); margin-left: 3px; }
-.ch.is-data::after { content: "\25a0"; color: var(--rx);     margin-left: 3px; }
+/* Gateway / data flags removed 2026-10-08 with the channel markings.
+ * Those flags were a German-CB rule layer and did not internationalise. */
 
 /* --------------------------------------------------------------------------
    13. Compact density: maximum character space

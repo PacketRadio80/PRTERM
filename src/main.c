@@ -173,6 +173,9 @@ static int cmd_check_ini(const char *path)
                    st->modem[0] != '\0' ? " / " : "",
                    st->modem[0] != '\0' ? st->modem : "");
             printf("               CALLERID    : %s\n", st->callerid);
+            printf("               Mode        : %s%s\n",
+                   pr_band_mode_name(st->mode != 0 ? st->mode : cfg.mode),
+                   st->mode != 0 ? "" : "  (from [radio])");
             if (st->antenna[0] != '\0')
                 printf("               Antenna     : %s\n", st->antenna);
         }
@@ -347,6 +350,31 @@ static int cli(int argc, char **argv, const char *ini_path)
     }
     if (strcmp(cmd, "--channels") == 0) {
         cmd_channels(argc > 2 ? argv[2] : NULL);
+        return 0;
+    }
+    if (strcmp(cmd, "--gen-ini") == 0) {
+        const char *path = argc > 2 ? argv[2] : "prterm.ini";
+        char err[256];
+        pr_config cfg;
+        ini *i;
+
+        pr_config_defaults(&cfg);
+        i = ini_new();
+        if (i == NULL) {
+            fprintf(stderr, "ERROR: out of memory\n");
+            pr_config_free(&cfg);
+            return 1;
+        }
+        pr_config_write(&cfg, i);
+        if (ini_save(i, path, err, sizeof err) != 0) {
+            fprintf(stderr, "ERROR: %s\n", err);
+            ini_free(i);
+            pr_config_free(&cfg);
+            return 1;
+        }
+        printf("wrote sample configuration: %s\n", path);
+        ini_free(i);
+        pr_config_free(&cfg);
         return 0;
     }
     if (strcmp(cmd, "--print-config") == 0) {

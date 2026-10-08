@@ -57,6 +57,7 @@
 #include "serial.h"
 #include "callsign.h"
 #include "tncsock.h"
+#include "trace.h"
 #include "util.h"
 
 #include <errno.h>
@@ -115,6 +116,9 @@ typedef struct tncd_station {
     size_t        rx_len;
 
     bool        kiss_active;   /* KISS is entered and being held      */
+    bool        kiss_first_entry; /* send_kiss_params runs only on cold
+                                  * start; door: prevents spurious PTT
+                                  * keying on every repair.                  */
     char        detail[64];    /* what the watch is doing / last finding */
     time_t      last_watch;
     time_t      last_repair;
@@ -142,6 +146,40 @@ static double mono_s(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+/* Trace helper - labels every direction with the station name. */
+static void tr_hex(tncd_station *st, pr_trace_level lv, const char *dir,
+                   const void *data, size_t len)
+{
+    char label[80];
+    snprintf(label, sizeof label, "%s %s", st->name, dir);
+    pr_trace_hex(lv, label, (const unsigned char *)data, len);
+}
+
+/* Portable substring search in a byte block (memmem is GNU). */
+static bool mem_contains(const unsigned char *hay, size_t hlen,
+                         const char *needle)
+{
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || nlen > hlen)
+        return false;
+    for (size_t i = 0; i + nlen <= hlen; i++)
+        if (memcmp(hay + i, needle, nlen) == 0)
+            return true;
+    return false;
+}
+
+/* Append received bytes to the CGI buffer, eliding overflow. */
+static void rx_append(tncd_station *st, const unsigned char *buf, size_t n)
+{
+    if (st->rx_len + n > sizeof st->rx) {
+        size_t drop = st->rx_len + n - sizeof st->rx;
+        memmove(st->rx, st->rx + drop, st->rx_len - drop);
+        st->rx_len -= drop;
+    }
+    memcpy(st->rx + st->rx_len, buf, n);
+    st->rx_len += n;
+}
+
 /* Write and wait until the bytes have really left the interface. */
 static bool dev_write(tncd_station *st, const void *data, size_t len)
 {
@@ -149,11 +187,30 @@ static bool dev_write(tncd_station *st, const void *data, size_t len)
     if (!st->open)
         return false;
     (void)pr_serial_hold_dtr(&st->ser, e2, sizeof e2);
-    if (pr_serial_write(&st->ser, data, len, e2, sizeof e2) != 0)
+    if (pr_serial_write(&st->ser, data, len, e2, sizeof e2) != 0) {
+        pr_trace(PR_TR_ERROR, "%s: serial write failed: %s", st->name, e2);
         return false;
+    }
     if (st->ser.fd >= 0)
         (void)tcdrain(st->ser.fd);
+    tr_hex(st, PR_TR_TRACE, "SER>>", data, len);
     return true;
+}
+
+/* Read with trace - every answer of the device becomes visible. */
+static long dev_read(tncd_station *st, void *buf, size_t cap,
+                     int timeout_ms, int quiet_ms, const char *what)
+{
+    char e2[128];
+    long n = pr_serial_read_quiet(&st->ser, buf, cap, timeout_ms, quiet_ms,
+                                  e2, sizeof e2);
+    if (n > 0)
+        tr_hex(st, PR_TR_TRACE, "SER<<", buf, (size_t)n);
+    else if (n < 0)
+        pr_trace(PR_TR_WARN, "%s: read failed (%s): %s", st->name, what, e2);
+    else
+        pr_trace(PR_TR_DEBUG, "%s: %s - device silent", st->name, what);
+    return n;
 }
 
 /* Read and discard - leftovers from switching confuse every probe. */
@@ -161,8 +218,10 @@ static void dev_drain(tncd_station *st, int timeout_ms, int quiet_ms)
 {
     unsigned char junk[2048];
     char e2[128];
-    (void)pr_serial_read_quiet(&st->ser, junk, sizeof junk,
-                               timeout_ms, quiet_ms, e2, sizeof e2);
+    long n = pr_serial_read_quiet(&st->ser, junk, sizeof junk,
+                                  timeout_ms, quiet_ms, e2, sizeof e2);
+    if (n > 0)
+        tr_hex(st, PR_TR_TRACE, "SER<< (drained)", junk, (size_t)n);
 }
 
 /*
@@ -204,7 +263,6 @@ static dev_health probe_terminal(tncd_station *st,
 {
     static const unsigned char esc_v[] = { 0x1B, 'V', 0x0D };
     static const unsigned char info[]  = { 'I', 'N', 'F', 'O', '\r' };
-    char e2[128];
 
     bool tapr = pr_str_eq_ci(st->cfg.kiss_init, "tapr");
     const unsigned char *probe = tapr ? info : esc_v;
@@ -217,10 +275,13 @@ static dev_health probe_terminal(tncd_station *st,
     usleep(400000);
 
     unsigned char buf[2048];
-    long n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 3000, 600,
-                                  e2, sizeof e2);
-    if (n <= 0)
+    long n = dev_read(st, buf, sizeof buf, 3000, 600, "terminal probe");
+    if (n <= 0) {
+        pr_trace(PR_TR_DEBUG,
+                 "%s: probe - no answer (KISS mode? power? baud? DTR?)",
+                 st->name);
         return DEV_SILENT;
+    }
 
     if (out != NULL && outcap > 0) {
         size_t k = (size_t)n < outcap ? (size_t)n : outcap;
@@ -235,9 +296,13 @@ static dev_health probe_terminal(tncd_station *st,
     size_t k = pr_probe_strip_echo(tmp, (size_t)n);
     if (tapr)
         k = pr_probe_remove_bytes(tmp, k, info, sizeof info);
-    if (!pr_probe_has_content(tmp, k))
+    if (!pr_probe_has_content(tmp, k)) {
+        pr_trace(PR_TR_DEBUG, "%s: probe - echo only (DTR lost?)", st->name);
         return DEV_ECHO;
+    }
 
+    pr_trace(PR_TR_DEBUG, "%s: probe - terminal answers (score %d)",
+             st->name, pr_probe_score(tmp, k));
     return DEV_ALIVE;
 }
 
@@ -258,8 +323,38 @@ static void kiss_param(tncd_station *st, unsigned cmd, unsigned char value)
  * to whatever its EPROM says - that was one of the reasons why KISS
  * "did not work" here.
  */
-static void send_kiss_params(tncd_station *st)
+/*
+ * KISS CSMA parameters (TXDELAY/SLOTTIME/PERSIST/TXTAIL/FULLDUPLEX).
+ *
+ * NO-AUTO-TX contract (2026-10-08).
+ *
+ * Under the KISS protocol param frames are configuration and MUST NOT
+ * key the transmitter. Real TheFirmware and TAPR firmware honour this.
+ * Some lesser or stale firmware, however, treats any byte after KISS
+ * entry as data traffic — a spurious transmission is the worst-case,
+ * and in fact has been observed. We therefore write params ONCE on the
+ * first successful entry, never again on a repair. A door:
+ * `[daemon] resend_kiss_params = yes` re-enables re-write after a TX-
+ * induced KISS loss for installations that need a guaranteed fix-up.
+ */
+static void send_kiss_params(tncd_station *st, bool force)
 {
+    /*
+     * NO-AUTO-TX (2026-10-08):
+     *   cold start        -> always emit  (kiss_first_entry == false)
+     *   repair, default   -> skip         (kiss_first_entry true)
+     *   repair, opt-in    -> emit         ([daemon] resend_kiss_params)
+     *   forced call       -> emit         (CHECKUP repair path)
+     */
+    if (st->kiss_first_entry && !force && !st->cfg.resend_kiss_params)
+        return;
+    st->kiss_first_entry = true;
+
+    pr_trace(PR_TR_DEBUG,
+             "%s: KISS params TXDELAY=%d SLOTTIME=%d PERSIST=%d TXTAIL=%d "
+             "FULLDUP=%d",
+             st->name, TNCD_TXDELAY, TNCD_SLOTTIME, TNCD_PERSIST,
+             TNCD_TXTAIL, st->cfg.duplex == PR_DUPLEX_FULL ? 1 : 0);
     kiss_param(st, KISS_CMD_TXDELAY,  TNCD_TXDELAY);
     usleep(100000);
     kiss_param(st, KISS_CMD_SLOTTIME, TNCD_SLOTTIME);
@@ -278,32 +373,64 @@ static void send_kiss_params(tncd_station *st)
 
 /*
  * The TNC must know its own identity - KISS DATA is only keyed when
- * MYCALL is set (MAX25 note on PTT). The command differs per class:
+ * MYCALL is set (MAX25 kiss_bridge.py: "PTT: TNC firmware keys on
+ * KISS DATA (requires MYCALL)"). The command differs per class:
  *
  *   esc   TheFirmware:  ESC I <call>\r   (tfb.c Icmd)
  *   tapr  TAPR class:   "MYCALL <call>\r"
+ *
+ * A '?' in the first bytes of the reply means rejected. One retry
+ * after a buffer flush; a final rejection is loud but not fatal -
+ * the EPROM may still hold a MYCALL that keys.
  */
-static void set_mycall(tncd_station *st)
+static bool mycall_reply_ok(const unsigned char *reply, long n)
+{
+    if (n <= 0)
+        return true;                  /* silent = accepted (no echo) */
+    size_t k = (size_t)n < 32 ? (size_t)n : 32;
+    return memchr(reply, '?', k) == NULL;
+}
+
+static bool set_mycall(tncd_station *st)
 {
     char cmd[32];
+    bool tapr = pr_str_eq_ci(st->cfg.kiss_init, "tapr");
 
-    if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
-        snprintf(cmd, sizeof cmd, "MYCALL %.9s\r", st->cfg.callerid);
-        (void)dev_write(st, cmd, strlen(cmd));
-    } else {
-        unsigned char esc = 0x1B;
-        snprintf(cmd, sizeof cmd, "I %.9s\r", st->cfg.callerid);
-        (void)dev_write(st, &esc, 1);
-        (void)dev_write(st, cmd, strlen(cmd));
+    for (int attempt = 1; attempt <= 2; attempt++) {
+        if (tapr) {
+            snprintf(cmd, sizeof cmd, "MYCALL %.9s\r", st->cfg.callerid);
+            if (!dev_write(st, cmd, strlen(cmd)))
+                return false;
+        } else {
+            unsigned char esc = 0x1B;
+            snprintf(cmd, sizeof cmd, "I %.9s\r", st->cfg.callerid);
+            if (!dev_write(st, &esc, 1))
+                return false;
+            if (!dev_write(st, cmd, strlen(cmd)))
+                return false;
+        }
+        usleep(400000);
+
+        unsigned char reply[128];
+        long n = dev_read(st, reply, sizeof reply, 400, 150, "MYCALL reply");
+        if (mycall_reply_ok(reply, n)) {
+            pr_trace(PR_TR_INFO, "%s: MYCALL %.9s accepted",
+                     st->name, st->cfg.callerid);
+            return true;
+        }
+        pr_trace(PR_TR_WARN, "%s: MYCALL %.9s rejected ('?' in reply)%s",
+                 st->name, st->cfg.callerid,
+                 attempt == 1 ? " - flush and retry" : "");
+        if (attempt == 1) {
+            static const unsigned char flush[] = { 0x11, 0x18 };
+            (void)dev_write(st, flush, sizeof flush);
+            usleep(200000);
+            dev_drain(st, 200, 100);
+        }
     }
-    usleep(400000);
 
-    unsigned char reply[128];
-    char e2[128];
-    long n = pr_serial_read_quiet(&st->ser, reply, sizeof reply, 400, 150,
-                                  e2, sizeof e2);
-    if (n > 0 && memchr(reply, '?', 32 < (size_t)n ? 32 : (size_t)n) != NULL)
-        pr_strlcpy(st->detail, "MYCALL not accepted", sizeof st->detail);
+    pr_strlcpy(st->detail, "MYCALL not accepted", sizeof st->detail);
+    return false;
 }
 
 /* ======================================================================= */
@@ -420,9 +547,120 @@ static bool recover_terminal(tncd_station *st)
 /* ======================================================================= */
 
 /*
- * The order is crucial: leave KISS first. That is a control frame
- * and does NOT go on the air. Only then one may write commands -
- * otherwise one transmits oneself.
+ * TheFirmware: C0 FF C0 and ESC QRES RESET the firmware. Commands
+ * sent while it boots are lost - that is how a false "KISS held"
+ * comes into existence (MYCALL and entry vanish into the boot, the
+ * TNC stays in terminal mode, DATA frames are terminal junk and the
+ * PTT never keys). Wait for the banner AND a quiet line afterwards.
+ */
+static void wait_boot_settle(tncd_station *st, int max_ms)
+{
+    unsigned char buf[2048];
+    bool banner = false;
+    int waited = 0, quiet = 0;
+    const int step_ms = 150;
+
+    while (waited < max_ms && !g_stop) {
+        char e2[128];
+        long n = pr_serial_read_quiet(&st->ser, buf, sizeof buf,
+                                      step_ms, 80, e2, sizeof e2);
+        waited += step_ms;
+        if (n > 0) {
+            tr_hex(st, PR_TR_TRACE, "SER<< (boot)", buf, (size_t)n);
+            if (pr_probe_has_banner(buf, (size_t)n))
+                banner = true;
+            quiet = 0;
+        } else if (banner) {
+            quiet += step_ms;
+            if (quiet >= 300)
+                break;
+        }
+    }
+    pr_trace(banner ? PR_TR_DEBUG : PR_TR_WARN,
+             "%s: boot settle - banner %s after %d ms",
+             st->name, banner ? "seen" : "NOT seen", waited);
+}
+
+/* One KISS-entry attempt, in the language of the device class. */
+static void kiss_enter(tncd_station *st)
+{
+    if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
+        static const unsigned char kiss_on[] = "kiss on\r";
+        (void)dev_write(st, kiss_on, sizeof kiss_on - 1);
+    } else {
+        static const unsigned char at_k[] = { 0x1B, 0x40, 0x4B };
+        (void)dev_write(st, at_k, sizeof at_k);
+    }
+    usleep(500000);
+
+    /*
+     * "auto" (MAX25 tnc_serial_recovery.enter_kiss): some firmware
+     * answers the first ESC @K with the TEXT "kiss on" without
+     * switching - the second one then switches.
+     */
+    unsigned char reply[128];
+    long n = dev_read(st, reply, sizeof reply, 300, 150, "KISS entry reply");
+    if (pr_str_eq_ci(st->cfg.kiss_init, "auto") && n > 0 &&
+        mem_contains(reply, (size_t)n, "kiss on")) {
+        pr_trace(PR_TR_DEBUG,
+                 "%s: entry answered 'kiss on' - repeating ESC @K", st->name);
+        static const unsigned char at_k[] = { 0x1B, 0x40, 0x4B };
+        (void)dev_write(st, at_k, sizeof at_k);
+        usleep(500000);
+        dev_drain(st, 300, 150);
+    }
+}
+
+/*
+ * Verification of the KISS entry: a device in KISS mode ignores
+ * terminal probes (bytes without FEND are dropped by its KISS
+ * parser). Answers the probe as a terminal, the entry did NOT take
+ * - DATA frames would be terminal junk and the PTT would never key.
+ * One probe here is not "poking a held KISS": it runs exactly once
+ * per entry, not periodically.
+ */
+static bool kiss_entry_confirmed(tncd_station *st)
+{
+    static const unsigned char esc_v[] = { 0x1B, 'V', 0x0D };
+    static const unsigned char info[]  = { 'I', 'N', 'F', 'O', '\r' };
+    bool tapr = pr_str_eq_ci(st->cfg.kiss_init, "tapr");
+
+    if (!dev_write(st, tapr ? (const void *)info : (const void *)esc_v,
+                   tapr ? sizeof info : sizeof esc_v))
+        return false;
+    usleep(400000);
+
+    unsigned char reply[512];
+    long n = dev_read(st, reply, sizeof reply, 800, 300, "entry verify");
+    if (n <= 0)
+        return true;                        /* silent - KISS holds  */
+
+    unsigned char tmp[512];
+    memcpy(tmp, reply, (size_t)n);
+    size_t k = pr_probe_strip_echo(tmp, (size_t)n);
+    if (tapr)
+        k = pr_probe_remove_bytes(tmp, k, info, sizeof info);
+    if (!pr_probe_has_content(tmp, k))
+        return true;                        /* pure echo - KISS holds */
+
+    pr_trace(PR_TR_WARN,
+             "%s: entry verify - terminal still answers, KISS NOT held",
+             st->name);
+    return false;
+}
+
+/*
+ * Enter KISS and hold it. The model is MAX25 kiss_bridge.py
+ * (_stabilize_unlocked):
+ *
+ *   - C0 FF C0 ONLY when we believe KISS is held. On TheFirmware it
+ *     is a firmware reset - sent blindly at a terminal-mode device
+ *     it buys a boot race and nothing else.
+ *   - A device that is silent on the probe may already sit in KISS
+ *     from an earlier run; the recovery ladder starts with the KISS
+ *     return frame and handles that case.
+ *   - MYCALL before the entry (PTT gate), entry WITH verification,
+ *     parameters last.
  */
 static bool ensure_kiss(tncd_station *st, bool force, char *err, size_t errlen)
 {
@@ -435,52 +673,76 @@ static bool ensure_kiss(tncd_station *st, bool force, char *err, size_t errlen)
     if (st->kiss_active && !force)
         return true;
 
-    /*
-     * 1. Leave KISS. C0 FF C0 is a control frame, nothing goes on
-     *    the air. On TheFirmware it additionally resets the firmware,
-     *    which is why the boot is waited out below instead of
-     *    counting down a fixed time.
-     */
-    {
+    pr_trace(PR_TR_INFO, "%s: ensure_kiss (%s, KISS was %s)", st->name,
+             force ? "forced" : "repair",
+             st->kiss_active ? "held" : "lost");
+
+    /* 1. Leave KISS - only when we believe we are in it. The boot
+     *    after the firmware reset is waited out (banner + quiet). */
+    if (st->kiss_active) {
         static const unsigned char leave[] = { 0xC0, 0xFF, 0xC0 };
         if (!dev_write(st, leave, sizeof leave)) {
             snprintf(err, errlen, "write to the device failed");
             return false;
         }
-        usleep(1500000);
-        dev_drain(st, 2500, 800);
+        st->kiss_active = false;
+        wait_boot_settle(st, 6000);
+        dev_drain(st, 500, 200);
     }
 
     /* 2. Terminal probe - the ladder only when it is needed     */
     if (probe_terminal(st, NULL, 0, NULL) != DEV_ALIVE) {
         if (!recover_terminal(st)) {
-            st->kiss_active = false;
             snprintf(err, errlen,
                      "device does not answer - check port, baud rate and DTR");
             return false;
         }
+        /* The ladder may have reset the firmware - wait the boot out
+         * and demand one clean terminal answer before commands. */
+        wait_boot_settle(st, 6000);
+        if (probe_terminal(st, NULL, 0, NULL) != DEV_ALIVE) {
+            snprintf(err, errlen,
+                     "device does not answer after recovery");
+            return false;
+        }
     }
 
-    /* 3. MYCALL - KISS DATA is only keyed with an identity     */
-    set_mycall(st);
+    /* 3. MYCALL - the PTT gate. Not fatal (EPROM may hold one),
+     *    but loud: without it the transmitter never keys. */
+    if (!set_mycall(st))
+        pr_trace(PR_TR_WARN,
+                 "%s: continuing without confirmed MYCALL - "
+                 "PTT may stay off", st->name);
 
-    /* 4. Enter KISS - per profile (docs/TNC-INIT.md section 2) */
-    if (pr_str_eq_ci(st->cfg.kiss_init, "tapr")) {
-        static const unsigned char kiss_on[] = "kiss on\r";
-        (void)dev_write(st, kiss_on, sizeof kiss_on - 1);
-    } else {
-        static const unsigned char kiss_on[] = { 0x1B, 0x40, 0x4B };
-        (void)dev_write(st, kiss_on, sizeof kiss_on);
+    /* 4. KISS entry with verification, at most two attempts    */
+    bool confirmed = false;
+    for (int attempt = 1; attempt <= 2 && !confirmed; attempt++) {
+        kiss_enter(st);
+        confirmed = kiss_entry_confirmed(st);
+        if (!confirmed)
+            pr_trace(PR_TR_WARN,
+                     "%s: KISS entry not confirmed (attempt %d)",
+                     st->name, attempt);
     }
-    usleep(500000);
-    dev_drain(st, 300, 150);
+    if (!confirmed) {
+        pr_strlcpy(st->detail, "KISS entry not confirmed",
+                   sizeof st->detail);
+        snprintf(err, errlen,
+                 "KISS entry not confirmed - terminal still answers");
+        return false;
+    }
 
-    /* 5. KISS parameters - channel access must be defined      */
-    send_kiss_params(st);
+    /* 5. KISS parameters - channel access must be defined.
+     *
+     * NO-AUTO-TX: the param write is allowed only on the first cold
+     * start of the daemon, never on every repair. See send_kiss_params
+     * for the rationale and the [daemon] resend_kiss_params door. */
+    send_kiss_params(st, false);
 
     st->kiss_active = true;
     st->last_repair = time(NULL);
     pr_strlcpy(st->detail, "KISS held", sizeof st->detail);
+    pr_trace(PR_TR_INFO, "%s: KISS held (entry confirmed)", st->name);
     if (err != NULL)
         err[0] = '\0';
     return true;
@@ -520,6 +782,8 @@ static void station_pump(tncd_station *st)
     if (n <= 0)
         return;
 
+    tr_hex(st, PR_TR_TRACE, "SER<< (pump)", buf, (size_t)n);
+
     /*
      * Drop-out detection: while KISS is held the device speaks frames
      * only. A firmware banner means it rebooted or was reset - from
@@ -529,16 +793,12 @@ static void station_pump(tncd_station *st)
     if (st->kiss_active && pr_probe_has_banner(buf, (size_t)n)) {
         st->kiss_active = false;
         pr_strlcpy(st->detail, "device left KISS", sizeof st->detail);
+        pr_trace(PR_TR_WARN,
+                 "%s: firmware banner while KISS held - device reset "
+                 "itself, watch will repair", st->name);
     }
 
-    /* Make room      */
-    if (st->rx_len + (size_t)n > sizeof st->rx) {
-        size_t drop = st->rx_len + (size_t)n - sizeof st->rx;
-        memmove(st->rx, st->rx + drop, st->rx_len - drop);
-        st->rx_len -= drop;
-    }
-    memcpy(st->rx + st->rx_len, buf, (size_t)n);
-    st->rx_len += (size_t)n;
+    rx_append(st, buf, (size_t)n);
 }
 
 /*
@@ -548,6 +808,9 @@ static void station_pump(tncd_station *st)
 static void tx_pace(tncd_station *st)
 {
     double gap = mono_s() - st->last_tx;
+    if (st->last_tx > 0.0 && gap < TNCD_MIN_TX_GAP_S)
+        pr_trace(PR_TR_DEBUG, "%s: TX pacing - waiting %.1f s",
+                 st->name, TNCD_MIN_TX_GAP_S - gap);
     while (gap < TNCD_MIN_TX_GAP_S && !g_stop) {
         station_pump(st);
         usleep(100000);
@@ -573,6 +836,39 @@ static void answer(int fd, const char *fmt, ...)
     if (write(fd, line, (size_t)n) != n) {
         /* Peer gone - will show up in the next poll()            */
     }
+}
+
+/*
+ * Did the device hear us? A DATA frame that lands in TERMINAL mode
+ * is answered with a prompt or an error - the proof that KISS was
+ * not held. That was the invisible half of "socket says OK, but the
+ * PTT never keys". Legal KISS bytes in this window are ordinary
+ * reception and go into the RX buffer.
+ */
+static void post_tx_check(tncd_station *st)
+{
+    unsigned char buf[512];
+    char e2[128];
+    long n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 250, 120,
+                                  e2, sizeof e2);
+    if (n <= 0) {
+        pr_trace(PR_TR_DEBUG, "%s: post-TX - device silent, KISS holds",
+                 st->name);
+        return;
+    }
+    tr_hex(st, PR_TR_TRACE, "SER<< (post-TX)", buf, (size_t)n);
+
+    if (pr_probe_has_banner(buf, (size_t)n) ||
+        mem_contains(buf, (size_t)n, "cmd:")) {
+        st->kiss_active = false;
+        pr_strlcpy(st->detail, "terminal answered after TX",
+                   sizeof st->detail);
+        pr_trace(PR_TR_WARN,
+                 "%s: terminal answered after TX - KISS was NOT held, "
+                 "watch repairs before the next frame", st->name);
+        return;
+    }
+    rx_append(st, buf, (size_t)n);
 }
 
 static void handle_command(tncd_station *st, int fd, const char *line)
@@ -604,6 +900,8 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             answer(fd, "ERR no data");
             return;
         }
+        pr_trace(PR_TR_DEBUG, "%s: TX %zu bytes requested", st->name, n);
+        tr_hex(st, PR_TR_TRACE, "TX frame (socket)", data, n);
 
         /*
          * ONLY KISS frames may go to the device. In KISS mode every
@@ -611,15 +909,19 @@ static void handle_command(tncd_station *st, int fd, const char *line)
          * the transmitter.
          */
         if (n < 2 || data[0] != KISS_FEND || data[n - 1] != KISS_FEND) {
+            pr_trace(PR_TR_WARN, "%s: TX rejected - not a KISS frame",
+                     st->name);
             answer(fd, "ERR not a KISS frame");
             return;
         }
 
         /* The frame is passed through unchanged - the driver has
-         * already built it (FCS included in the AX.25 sense: none,
-         * the TNC computes it). */
+         * already built it (no FCS: the TNC computes it on air, see
+         * docs/TNC-INIT.md section 4). */
         if (!st->kiss_active) {
             char err[256];
+            pr_trace(PR_TR_INFO, "%s: KISS not held - repairing before TX",
+                     st->name);
             if (!ensure_kiss(st, true, err, sizeof err)) {
                 answer(fd, "ERR %.200s", err);
                 return;
@@ -633,7 +935,10 @@ static void handle_command(tncd_station *st, int fd, const char *line)
             answer(fd, "ERR write to the device failed");
             return;
         }
+        pr_trace(PR_TR_INFO, "%s: TX %zu bytes written to the device",
+                 st->name, n);
         answer(fd, "OK %zu", n);
+        post_tx_check(st);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_RX)) {
         if (st->rx_len == 0) {
@@ -654,6 +959,7 @@ static void handle_command(tncd_station *st, int fd, const char *line)
                st->detail);
 
     } else if (pr_str_eq_ci(cmd, PR_TNC_CMD_CHECKUP)) {
+        pr_trace(PR_TR_INFO, "%s: CHECKUP requested", st->name);
         if (!st->open) {
             answer(fd, "ERR device not open");
             return;
@@ -666,6 +972,7 @@ static void handle_command(tncd_station *st, int fd, const char *line)
         answer(fd, "OK KISS held");
 
     } else {
+        pr_trace(PR_TR_WARN, "%s: unknown command \"%.60s\"", st->name, cmd);
         answer(fd, "ERR unknown command %.60s", cmd);
     }
 }
@@ -781,6 +1088,8 @@ static void station_watch(tncd_station *st)
         return;                       /* repair is running/just ran  */
 
     char err[256];
+    pr_trace(PR_TR_INFO, "%s: watch - KISS lost (%s), repairing",
+             st->name, st->detail);
     if (ensure_kiss(st, true, err, sizeof err))
         printf("  %-10s repaired - %s\n", st->name, st->detail);
     else
@@ -861,6 +1170,8 @@ static int run_daemon(tncd_station *stations, size_t nst)
             clients[slot].fd  = cfd;
             clients[slot].st  = st;
             clients[slot].len = 0;
+            pr_trace(PR_TR_DEBUG, "%s: client connected (fd %d)",
+                     st->name, cfd);
         }
 
         /* Commands of the connected clients                       */
@@ -942,6 +1253,11 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    pr_trace_init((pr_trace_level)base.debug_level, "tncd");
+    pr_trace(PR_TR_INFO, "prterm-tncd starting - INI %s, debug level %s",
+             ini_path,
+             pr_trace_level_name((pr_trace_level)base.debug_level));
+
     tncd_station stations[TNCD_MAX_STATIONS];
     memset(stations, 0, sizeof stations);
     size_t nst = 0;
@@ -968,6 +1284,10 @@ int main(int argc, char **argv)
         st->listen_fd = -1;
 
         printf("  %-10s %s\n", st->name, st->cfg.port);
+        pr_trace(PR_TR_INFO,
+                 "%s: port %s serial %ld %s radio %ld kiss_init %s call %s",
+                 st->name, st->cfg.port, st->cfg.baud, st->cfg.serial_line,
+                 st->cfg.radio_baud, st->cfg.kiss_init, st->cfg.callerid);
 
         if (!station_open(st, err, sizeof err)) {
             fprintf(stderr, "ERROR %s: %s\n", st->name, err);

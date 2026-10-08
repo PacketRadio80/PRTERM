@@ -230,7 +230,7 @@
     set("s-callid", s.callid || "CQ");
     set("s-freq", fmtFreq(s.freq_hz));
     set("s-mode", String(s.mode || "").toUpperCase());
-    set("s-channel", s.channel > 0 ? s.channel : "—");
+    // Channel indicator removed 2026-10-08 - s-channel element gone.
 
     set("s-rx", s.rx_count || 0);
     set("s-tx", s.tx_count || 0);
@@ -346,53 +346,13 @@
     });
   }
 
-  /*
-   * Test carrier in the admin area - a device test, not operation.
+  /* pttTest() REMOVED on 2026-10-08.
    *
-   * Even an empty carrier is a transmission. So announce first, then
-   * show the countdown and only send after confirmation. Abort is
-   * possible at any time.
-   */
-  var pttBusy = false;
-
-  function pttTest() {
-    if (pttBusy) return;
-    var out = $("pttstate");
-
-    /* Stage 1: announce. Sends nothing yet.         */
-    pttBusy = true;
-    if (out) out.textContent = L("Checking …");
-    post({ action: "ptt", run: "0" }, function (j) {
-      if (!j || j.ok !== true) {
-        if (out) out.textContent = "";
-        flash((j && j.error) || L("test rejected"), "err");
-        pttBusy = false;
-        return;
-      }
-      var wait = j.wait || 3;
-      if (out) out.textContent = j.announce || L("TX in %s seconds").replace("%s", wait);
-
-      /* Countdown - abort stays possible.    */
-      var left = wait;
-      var tick = setInterval(function () {
-        left--;
-        if (left <= 0) {
-          clearInterval(tick);
-          if (out) out.textContent = L("Sending …");
-          /* Stage 2: only now something goes on the air. */
-          post({ action: "ptt", run: "1" }, function (k) {
-            pttBusy = false;
-            if (out) out.textContent = k && k.ok === true
-              ? L("Test finished.") : "";
-            if (k && k.ok === false) flash(k.error || L("test failed"), "err");
-            refresh(true);
-          });
-        } else if (out) {
-          out.textContent = (j.announce || "TX") + " \u00b7 " + left + " s left";
-        }
-      }, 1000);
-    });
-  }
+   * The 3-second test carrier button is gone from the admin area — an
+   * empty carrier is a transmission under every legal framework PRTERM
+   * targets. Operators smoke-test the rig with a real CQ broadcast
+   * (action=tx with bcast=1). See PRTERM/src/pages.c around action=ptt
+   * for the matching removal on the server side. */
 
   function flash(msg, kind) {
     // Show it first in the login dialog, if that is open - there the
@@ -557,8 +517,7 @@
       });
     }
 
-    var ptt = $("ptttest");
-    if (ptt) ptt.addEventListener("click", pttTest);
+    /* "ptttest" button listener REMOVED on 2026-10-08 — see pttTest() note. */
 
     /* Channel grid */
     qsa(".ch").forEach(function (el) {

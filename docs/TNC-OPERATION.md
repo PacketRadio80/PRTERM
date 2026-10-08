@@ -128,14 +128,23 @@ Not every TNC speaks KISS the same way. Two independent choices:
 | `hostmode` / `host` / `tnc2` | TNC2 host converse, interactive |
 | `sixpack` | DF6BU 6PACK over serial |
 
-How the TNC is put into KISS, and taken back out:
+How the TNC is put into KISS, and taken back out (`kiss_init`):
 
-| Entry | | Exit | |
+| Entry | Into KISS | Exit | |
 |---|---|---|---|
-| `none` | already in KISS | `none` | stay in KISS |
-| `kiss_on` | `kiss on` command | `kiss_off` | `kiss off` command |
-| `esc_at_k` | `ESC @ K` frame | `kiss_frame` | `C0 FF C0` frame |
-| `auto` | probe both | `auto` | probe both |
+| `esc` | `ESC @K` (`1B 40 4B`, no `\r`) | `C0 FF C0` | firmware reset on TheFirmware |
+| `auto` | `ESC @K`, repeated once when the firmware only answers the text "kiss on" | `C0 FF C0` | PK-TNC2 (TheFirmware class) |
+| `tapr` | `kiss on\r` | `C0 FF C0` | real TAPR devices only |
+
+Two rules make the entry trustworthy:
+
+- `C0 FF C0` is sent **only while KISS is believed held** — on
+  TheFirmware it resets the firmware, and commands sent during the
+  boot are lost (the classic false "KISS held" with a deaf PTT).
+  After a reset the boot is waited out: banner, then a quiet line.
+- The entry is **verified**: the class probe (ESC V / INFO) must stay
+  silent afterwards. A terminal answer means the TNC never switched —
+  retry once, then fail visibly instead of pretending.
 
 Details and byte sequences: `docs/TNC-INIT.md`.
 
@@ -163,9 +172,10 @@ because its banner arrives as clean ASCII, which would show the parity bit at
 
 | Item | Owner |
 |---|---|
-| `MYCALL` on the TNC | set once at preparation |
+| `MYCALL` on the TNC | set once at preparation — **the PTT gate**: without an accepted MYCALL the firmware never keys on KISS DATA |
 | source address of outgoing UI frames | the caller, per message |
-| FCS on KISS `DATA` | **stripped before sending** — the TNC adds the CRC on air |
+| FCS on outgoing KISS `DATA` | **stripped** — the TNC adds the CRC on air |
+| FCS on incoming KISS `DATA` | the TNC delivers it **with** the trailer — validate, strip, drop frames with a bad CRC |
 | `persist` on CB | `255` |
 
 The FCS rule matters: if you hand a frame to a TNC that already carries a CRC,
@@ -196,7 +206,7 @@ Fringe and DX work needs an open squelch. Local work does not.
 |---|---|
 | TNC answers `?` or nothing | not in host mode — DTR sequencing, see §2 |
 | Echo-only on one port | stop PRTERM → recover that port → restart |
-| PTT never keys although the log says transmit | check FCS strip, `persist`, and that `MYCALL` was set |
+| PTT never keys although the log says transmit | `[debug] level = trace` and read the journal: MYCALL rejected (`'?' in reply`), entry not confirmed, or terminal answered after TX — plus FCS strip and `persist` |
 | Stuck after a crash | send the KISS return frame **before** re-preparing; do not skip the prep |
 | Something is badly wrong | `prterm.cgi --reset-tnc prterm.ini` |
 

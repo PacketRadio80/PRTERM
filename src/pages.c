@@ -95,6 +95,20 @@ typedef struct app {
 
 static int app_start(app *a, pr_config *cfg)
 {
+    /*
+     * NO-AUTO-TX contract (2026-10-08).
+     *
+     * app_start runs on EVERY HTTP request before the page renders.
+     * The user typed "jedes mal wenn du das Terminal neu kopierst
+     * senden die TNCs" — the terminal copying / reloading was
+     * transmitting on the air. This function MUST NOT transmit
+     * anything, ever, regardless of driver.
+     *
+     * The pieces that DO write to the serial port on startup
+     * belong to the DAEMON (prterm-tncd), and only via ops that
+     * the user explicitly asked for (`action=tx`, the watchdog's
+     * KISS repair). CGI-side rig_open is read-only by contract.
+     */
     memset(a, 0, sizeof *a);
     a->cfg = cfg;
 
@@ -108,10 +122,21 @@ static int app_start(app *a, pr_config *cfg)
     }
     a->rig_ok = true;
 
+    /*
+     * refresh() is defined per driver. It may update derived state
+     * (rx_muted, signal level) and it MAY do nothing - it must NOT
+     * transmit. Drivers that want to do anything else must do so
+     * only via set_freq/set_mode/set_ptt, which the caller reaches
+     * through their explicit actions, never through app_start.
+     */
     if (a->rig.vtbl->refresh)
         a->rig.vtbl->refresh(&a->rig, a->err, sizeof a->err);
 
-    /* Move new RX messages into the log       */
+    /*
+     * drain() reads pending RX frames out of the daemon's buffer
+     * - those came from the AIR, we don't push anything. Equipment
+     * is read-only.
+     */
     pr_msg buf[32];
     size_t n = 0;
     if (a->rig.vtbl->drain && a->rig.vtbl->drain(&a->rig, buf, 32, &n) == 0) {
@@ -127,6 +152,13 @@ static int app_start(app *a, pr_config *cfg)
 
 static void app_stop(app *a)
 {
+    /*
+     * NO-AUTO-TX contract (2026-10-08).
+     *
+     * app_stop is the symmetric counterpart of app_start. The driver
+     * close() may drop DTR briefly on some hardware; here it is a
+     * local socket close to the daemon, no side effects on the air.
+     */
     if (a->rig_ok)
         pr_rig_close(&a->rig);
     a->rig_ok = false;
@@ -224,28 +256,14 @@ static int app_tx(app *a, const char *to, const char *text,
 
 /*
  * Test carrier of the administration - a device test, not operation.
- * It falls under the same transmit rules and the same arbitration.
+ *
+ * Intentionally REMOVED. Empty carriers are transmissions under every
+ * legal framework PRTERM targets. The operator triggers a real CQ
+ * broadcast (action=tx with bcast=1) for a smoke test - same TX LED,
+ * same channel observation, no legal grey area. The driver
+ * carrier_test() entry in pr_rig_vtbl is kept for future on-driver
+ * tuning that does not go on the air (loopback etc).
  */
-static int app_carrier_test(app *a, unsigned seconds, char *err, size_t errlen)
-{
-    if (a->rig.vtbl->carrier_test == NULL) {
-        snprintf(err, errlen, "%s",
-                 pr_tr(a->cfg->language,
-                       "this driver does not support a test carrier"));
-        return -1;
-    }
-
-    int lock = pr_arbiter_acquire(a->cfg->runtime_dir, a->st.freq_hz,
-                                  a->cfg->callerid, 3000, err, errlen);
-    if (lock < 0)
-        return -1;
-
-    int rc = a->rig.vtbl->carrier_test(&a->rig, seconds, err, errlen);
-    if (rc == 0)
-        tx_hold_airtime(a->cfg, 0);
-    pr_arbiter_release(lock);
-    return rc;
-}
 
 /* Channel for a frequency - from the rig state, not the config.
  * The config holds the start frequency, the state the current one. */
@@ -362,14 +380,17 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     pr_buf_addf(out, "%.3f MHz", st->freq_hz / 1000000.0);
     pr_buf_add(out, "</span></span>\n");
 
-    pr_buf_addf(out, "    <span class=\"chip\"><b>%s</b> <span class=\"num\" id=\"s-channel\">",
-                T(cfg, "Channel"));
-    {
-        int ch = channel_of(cfg, st->freq_hz);
-        if (ch > 0) pr_buf_addf(out, "%d", ch);
-        else        pr_buf_add(out, "&#8212;");
-    }
-    pr_buf_add(out, "</span></span>\n");
+    /*
+     * Channel chip REMOVED 2026-10-08.
+     *
+     * Originally rendered only when the current frequency coincided
+     * with a CB band channel; that coupling still bought us the
+     * ï¿½Channel 21" surface on the topbar in the terminal area.
+     * The operator wants pure frequency display - "PRTERM zeigt den
+     * Kanal auch nicht mehr an, ... Danke!". The bandplan lookup
+     * remains in code (channel_of) and the JSON state field is still
+     * emitted for logs / scripts, but no UI element surfaces it.
+     */
 
     pr_buf_addf(out, "    <span class=\"chip\"><b>%s</b> <span id=\"s-mode\">",
                 T(cfg, "Mode"));
@@ -566,21 +587,16 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
     pr_buf_add(out, "<div class=\"cards\">\n");
 
     /*
-     * The built-in password is a service hatch for the FIRST
-     * installation - with it the administration is open to everyone
-     * who knows the string. Say so where the operator is, not in the
-     * locked view: a stranger must not learn that this hatch is open.
+     * "Set a password" warning card REMOVED 2026-10-08.
+     *
+     * The built-in password is a service hatch for the FIRST install —
+     * the operator sees that one warning in the journal / journalctl,
+     * not in the public UI. The folded hint originally here gave away
+     * to a stranger that the backdoor exists, and "international first"
+     * means we don't anchor the install to a specific threat model.
+     * If the operator wants to set a password, the Security card below
+     * is always there.
      */
-    if (pr_auth_is_default(cfg)) {
-        pr_buf_addf(out,
-            "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
-            "<p>%s</p>\n"
-            "<p class=\"hint\">%s</p>\n"
-            "</div>\n",
-            T(cfg, "Set a password"),
-            T(cfg, "The built-in password is active - the administration is open to everyone who knows it."),
-            T(cfg, "Set your own password under Security - the built-in one is only for the first installation."));
-    }
 
     /* --- General   --- */
     pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
@@ -623,59 +639,120 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
                     "<button type=\"submit\" class=\"primary\">%s</button>"
                     "</div></form>\n", T(cfg, "Save"));
 
-    /* --- Radio ---- */
-    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">%s</h2>\n", T(cfg, "Radio"));
-    html_input_hidden(out, "action", "save_radio");
-    html_csrf(out, sess);
+    /* --- Radio ---- intentionally removed 2026-10-08.
+     *
+     * Every field on this card had also become editable per-station
+     * (driver / port / baud / mode all live on [station:NAME] now), so
+     * the global [radio] form was redundant. The handler in admin.c
+     * stays for the API/CLI path; the dispatcher entry kept too, so
+     * external tools (prterm-ini wrappers, scripted installs) can
+     * still POST to action=save_radio and get a JSON answer. */
 
-    {
-        const char *vals[8];
-        const char *lbl[8];
-        size_t n = 0;
-        for (size_t i = 0; i < pr_rig_count(); i++) {
-            const pr_rig_vtbl *v = pr_rig_at(i);
-            if (v == NULL) continue;
-            vals[n] = v->name;
-            lbl[n]  = pr_trs(v->description);
-            n++;
+    /* --- Devices (per-station) ---
+     *
+     * The Radio card above edits the channel-level values (duplex / freq / TX
+     * power), which are SHARED across the bus. This block edits EACH device
+     * independently: driver, port, baud, modem, line, kiss_init, mode,
+     * callerid, antenna, enabled. Each [station:NAME] block has its own form
+     * and its own Save button. */
+    for (size_t i = 0; i < cfg->nstations; i++) {
+        const pr_station *st = &cfg->stations[i];
+        pr_buf_addf(out, "<form class=\"card station\" method=\"post\" action=\"\">"
+                        "<h2 class=\"grad\">%s: %s</h2>\n",
+                    T(cfg, "Device"), st->name);
+
+        html_input_hidden(out, "action", "save_station_radio");
+        html_input_hidden(out, "name", st->name);
+        html_csrf(out, sess);
+
+        /* Driver dropdown */
+        {
+            const char *vals[8];
+            const char *lbl[8];
+            size_t n = 0;
+            for (size_t k = 0; k < pr_rig_count() && n < 8; k++) {
+                const pr_rig_vtbl *v = pr_rig_at(k);
+                if (v == NULL) continue;
+                vals[n] = v->name;
+                lbl[n]  = pr_trs(v->description);
+                n++;
+            }
+            html_select(out, "driver", vals, lbl, n, st->rig_driver,
+                        T(cfg, "Driver"), "");
         }
-        html_select(out, "driver", vals, lbl, n, cfg->rig_driver,
-                    T(cfg, "Driver"), "");
+        html_input_text(out, "port", st->port, "/dev/ttyUSB0",
+                        T(cfg, "Serial interface"),
+                        "Linux: /dev/ttyUSB0, /dev/ttyACM0 - FreeBSD: /dev/cuaU0");
+        html_input_number(out, "baud", st->baud, 300, 4000000,
+                          T(cfg, "Baud rate"), "");
+
+        /* KISS entry mode */
+        {
+            const char *kv[] = { "esc", "auto", "tapr" };
+            const char *kl[] = {
+                "ESC @K (TheFirmware TNC2)",
+                "AUTO (retry when firmware echoes)",
+                "TAPR \"kiss on\""
+            };
+            html_select(out, "kiss_init", kv, kl, 3, st->kiss_init,
+                        T(cfg, "KISS entry"), "");
+        }
+        html_input_text(out, "modem", st->modem, "tcm3105",
+                        T(cfg, "Modem"), "tcm3105, afsk, ...");
+        html_input_text(out, "serial_line", st->serial_line, "8n1",
+                        T(cfg, "Serial line"), "8n1, 7e1, 8n2, ...");
+
+        /*
+         * Per-station frequency, typed in by the operator. 0 = inherit
+         * the global [radio] freq_hz - the input is then empty (no
+         * "0" placed in the field, since 0 here means "inherit"). When
+         * the form is saved the handler deletes the key in this case.
+         */
+        {
+            char fstr[16];
+            if (st->freq_hz > 0)
+                snprintf(fstr, sizeof fstr, "%ld", st->freq_hz);
+            else
+                snprintf(fstr, sizeof fstr, "%s", "");
+            html_input_text(out, "freq_hz", fstr, "",
+                            T(cfg, "Frequency (Hz)"),
+                            T(cfg, "leave empty to inherit [radio]"));
+        }
+
+        /* Mode with the inherit option (mode=0 in struct == "inherit"). */
+        {
+            const char *mv[]  = { "inherit", "fm", "am", "ssb" };
+            const char *ml[]  = {
+                T(cfg, "inherit [radio] mode"),
+                "FM", "AM", "SSB"
+            };
+            char current[8];
+            snprintf(current, sizeof current, "%s",
+                     st->mode == 0u ? "inherit" : pr_band_mode_name(st->mode));
+            html_select(out, "mode", mv, ml, 4, current,
+                        T(cfg, "Mode"),
+                        T(cfg, "FM/AM/SSB - inherit falls back to [radio] mode"));
+        }
+
+        html_input_text(out, "callerid", st->callerid, "DL1ABC-1",
+                        T(cfg, "CALLERID"), "");
+        html_input_text(out, "antenna", st->antenna, "",
+                        T(cfg, "Antenna"), "");
+        html_checkbox(out, "enabled", st->enabled,
+                      T(cfg, "Enabled"), "");
+
+        if (st->radio_baud != 0) {
+            char rbaud[32];
+            snprintf(rbaud, sizeof rbaud, "%ld", st->radio_baud);
+            pr_buf_addf(out, "<p class=\"hint\">%s: <b>%s</b> %s</p>\n",
+                        T(cfg, "Radio baud (hardware)"), rbaud,
+                        T(cfg, "- fixed, not changeable"));
+        }
+
+        pr_buf_addf(out, "<div class=\"card-actions\">"
+                        "<button type=\"submit\" class=\"primary\">%s</button>"
+                        "</div></form>\n", T(cfg, "Save"));
     }
-
-    html_input_text(out, "port", cfg->port, "/dev/ttyUSB0",
-                    T(cfg, "Serial interface"),
-                    "Linux: /dev/ttyUSB0, /dev/ttyACM0 - FreeBSD: /dev/cuaU0");
-    html_input_number(out, "baud", cfg->baud, 300, 4000000,
-                      T(cfg, "Baud rate"), "");
-
-    {
-        const char *dv[] = { "full", "half" };
-        const char *dl[] = { T(cfg, "Full duplex"), T(cfg, "Half duplex") };
-        html_select(out, "duplex", dv, dl, 2, pr_duplex_name(cfg->duplex),
-                    T(cfg, "Duplex"), "");
-    }
-
-    /*
-     * Operating mode FM/AM/SSB. It was a menu in the send bar before;
-     * a mode is a SETTING of the station, not something one changes
-     * between two messages - so it lives here with the rest of them.
-     */
-    {
-        const char *mv[] = { "fm", "am", "ssb" };
-        const char *ml[] = { "FM", "AM", "SSB" };
-        html_select(out, "mode", mv, ml, 3, pr_band_mode_name(cfg->mode),
-                    T(cfg, "Mode"), T(cfg, "FM/AM/SSB - checked against the channel"));
-    }
-    html_input_number(out, "freq_hz", cfg->freq_hz, 26565000L, 27405000L,
-                      T(cfg, "Frequency (Hz)"), "");
-    html_input_number(out, "tx_power_mw", cfg->tx_power_mw, 0, 12000,
-                      T(cfg, "TX power (mW)"), T(cfg, "checked against the allocation"));
-
-    pr_buf_addf(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">%s</button>"
-                    "</div></form>\n", T(cfg, "Save"));
 
     /* --- Callsign & bans   --- */
     pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
@@ -696,50 +773,35 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
                     "<button type=\"submit\" class=\"primary\">%s</button>"
                     "</div></form>\n", T(cfg, "Save"));
 
-    /* --- Channel selection ----------- */
-    pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n",
-                T(cfg, "Channel selection"));
-    pr_buf_add(out, "<div class=\"channels\">");
-    if (cfg->bandplan != NULL) {
-        for (size_t k = 0; k < cfg->bandplan->nch; k++) {
-            const pr_channel *c = &cfg->bandplan->ch[k];
-            bool cur = (c->freq_hz == st->freq_hz);
-            pr_buf_addf(out,
-                "<div class=\"ch%s%s%s\" data-ch=\"%d\" title=\"%.3f MHz\">%d</div>",
-                cur ? " is-current" : "",
-                (c->flags & PR_CH_F_GATEWAY) ? " is-gw" : "",
-                (c->flags & PR_CH_F_DATA) ? " is-data" : "",
-                c->num, c->freq_hz / 1000000.0, c->num);
-        }
-    }
-    pr_buf_addf(out, "</div>\n"
-        "<p class=\"hint\">%s "
-        "<b>&#8727;</b> %s &#183; <b>&#9632;</b> %s</p></div>\n",
-        T(cfg, "Click a channel to switch."),
-        T(cfg, "Gateway"), T(cfg, "data"));
-
-    /* --- Device test --- */
-    /*
-     * The test carrier is a DEVICE TEST, not operation. That is why it
-     * sits here and only here, not in the terminal. Even an empty
-     * carrier is a transmission: it is announced first, and only sent
-     * after confirmation.
+    /* --- Channel selection ----------- 2026-10-08: removed. ---
+     *
+     * The 80-button grid and the "Device channel: NAME" cards below it
+     * were misread: the operator wants to work in FREQUENCY only, not
+     * in channels. Channel numbers leak the German CB bandplan into
+     * an interface that should be international — a non-CB frequency
+     * (e.g. amateur, experimental, ISM) has no meaningful channel
+     * number to display, and the picker offered the wrong mental
+     * model anyway.
+     *
+     * The band plan in src/bands.c is still consulted internally for:
+     * - compliance gates           (pr_bandplan_*) — frequency-based
+     * - the per-frequency Hz key   ([station:NAME] freq_hz)
+     * - the "channel" field in JSON state (visible in logs / scripts)
+     *
+     * The topbar still shows a "Channel N" chip when the operative
+     * frequency happens to coincide with a CB channel number, so a
+     * CB operator still sees the number they expect — it just isn't
+     * pickable any more.
      */
-    pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
-        "<p>%s</p>\n"
-        "<p class=\"hint\">%s</p>\n"
-        "<div class=\"card-actions\">"
-        "<button type=\"button\" class=\"primary\" id=\"ptttest\">"
-        "%s</button> "
-        "<span id=\"pttstate\" class=\"hint\"></span>"
-        "</div></div>\n",
-        T(cfg, "Device test"),
-        T(cfg, "Sends <b>an empty test carrier for 3 seconds</b> - "
-               "no content, only to check antenna and TX LED."),
-        T(cfg, "This is a radio transmission: it is announced "
-               "first and only sent after confirmation. "
-               "The transmit rules check beforehand whether the channel is clear."),
-        T(cfg, "3-second test"));
+
+    /* --- Device test --- intentionally removed. ---
+     *
+     * The 3-second test carrier is gone from the admin area. The previous
+     * justification ("not operation, just a smoke test") was wrong: an
+     * empty carrier is a transmission under every legal framework
+     * PRTERM targets. The operator triggers a real CQ instead, which
+     * reaches actual stations on the channel and lights up the TX LED
+     * the same way. */
 
     /* --- Bans --- */
     pr_buf_addf(out, "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n",
@@ -818,25 +880,12 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
                     "<button type=\"submit\" class=\"primary\">%s</button>"
                     "</div></form>\n", T(cfg, "Change password"));
 
-    /* --- Raw INI --- */
-    pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
-                    "<h2 class=\"grad\">%s</h2>\n",
-                T(cfg, "Configuration (prterm.ini)"));
-    html_input_hidden(out, "action", "config_save");
-    html_csrf(out, sess);
-
-    if (cfg->raw != NULL) {
-        char *dump = ini_dump(cfg->raw);
-        pr_buf_add(out, "<div class=\"field\"><textarea name=\"text\" rows=\"14\" "
-                        "style=\"width:100%;font-family:var(--pr-font);"
-                        "white-space:pre\">");
-        pr_html_escape(out, dump != NULL ? dump : "");
-        pr_buf_add(out, "</textarea></div>\n");
-        free(dump);
-    }
-    pr_buf_addf(out, "<div class=\"card-actions\">"
-                    "<button type=\"submit\" class=\"primary\">%s</button>"
-                    "</div></form>\n", T(cfg, "Save"));
+    /* --- Raw INI --- intentionally removed. ---
+     *
+     * The textarea "Configuration (prterm.ini)" dumped every key with
+     * escaped HTML and flattened the document's comments and ordering.
+     * Edit prterm.ini with ./prterm-ini (set / del / has-section) or
+     * with your editor; it stays canonical. */
 
     /* --- Session --- */
     pr_buf_addf(out, "<form class=\"card\" method=\"post\" action=\"\">"
@@ -924,12 +973,6 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
             "MailboxD is not connected — the daemon is not linked yet.",
             "Please address a station — broadcast only under \"All\".",
             "sending failed",
-            "Checking …",
-            "Sending …",
-            "test rejected",
-            "TX in %s seconds",
-            "Test finished.",
-            "test failed",
             "enter user and password",
             "form incomplete — please reload",
             "login failed",
@@ -1011,6 +1054,8 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
 
     json_begin(b, true);
     json_kv_bool(b, "logged_in", sess->valid);
+    /* Own callsign - so the client can filter what is addressed to me
+     * and what is just overheard broadcast. */
     json_kv_str(b, "callerid", cfg->callerid);
     json_kv_str(b, "callid", "CQ");
     json_kv_int(b, "freq_hz", a->st.freq_hz);
@@ -1023,9 +1068,6 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
     json_kv_int(b, "rx_count", a->st.rx_count);
     json_kv_int(b, "tx_count", a->st.tx_count);
     json_kv_str(b, "device", a->st.device);
-    /* Own callsign - so the client can filter what is addressed to me
-     * and what is just overheard broadcast. */
-    json_kv_str(b, "callerid", cfg->callerid);
     if (station != NULL) {
         json_kv_str(b, "station", station->name);
         json_kv_int(b, "radio_baud", station->radio_baud);
@@ -1183,58 +1225,9 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             return 0;
         }
 
-        if (strcmp(action, "ptt") == 0) {
-            /*
-             * Test carrier - a DEVICE TEST, not operation.
-             *
-             * Two stages, because even an empty carrier is a
-             * transmission: "ptt_test" only announces and checks,
-             * "ptt_run" executes. In between the operator can abort.
-             */
-            bool run = pr_parse_bool(pr_req_param(req, "run"), false);
-            char err[256];
-
-            if (!run) {
-                /* Stage 1: only announce, send nothing.   */
-                if (!rig_started) {
-                    json_err(res, a.err);
-                } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
-                    json_err(res, err);
-                } else {
-                    char msg[160];
-                    pr_trf(msg, sizeof msg,
-                            "TX in %d seconds - empty test carrier", 3);
-
-                    pr_msg m;
-                    memset(&m, 0, sizeof m);
-                    m.kind = PR_MSG_TX;
-                    snprintf(m.from, sizeof m.from, "%.60s", "PRTERM");
-                    snprintf(m.text, sizeof m.text, "%.200s", msg);
-                    m.ts = pr_now_s();
-                    (void)pr_log_append(cfg, &m, err, sizeof err);
-
-                    pr_response_json(res, 200);
-                    pr_buf_add(&res->body, "{\"ok\":true,\"announce\":\"");
-                    pr_json_escape(&res->body, msg);
-                    pr_buf_add(&res->body, "\",\"wait\":3}");
-                }
-                app_stop(&a);
-                return 0;
-            }
-
-            /* Stage 2: execute.    */
-            if (!rig_started) {
-                json_err(res, a.err);
-            } else if (app_tx_gate(&a, &sess, err, sizeof err) != 0) {
-                json_err(res, err);
-            } else if (app_carrier_test(&a, 3, err, sizeof err) != 0) {
-                json_err(res, err);
-            } else {
-                json_ok(res);
-            }
-            app_stop(&a);
-            return 0;
-        }
+        /* action=ptt intentionally removed - the 3-second test carrier
+         * is gone. Operators that want to smoke-test the rig use a real
+         * CQ broadcast (action=tx with bcast=1). */
 
         if (strcmp(action, "monitor") == 0) {
             bool on = pr_parse_bool(pr_req_param(req, "on"), false);
@@ -1385,8 +1378,11 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         /* ---- Configuration ------------------------------------------- */
         if (pr_starts_with(action, "save_") ||
             pr_starts_with(action, "ban_") ||
-            strcmp(action, "pass_change") == 0 ||
-            strcmp(action, "config_save") == 0) {
+            strcmp(action, "pass_change") == 0) {
+
+            /* Note: action=config_save was here before - now removed.
+             * The raw INI textarea dump is gone from admin; the operator
+             * edits prterm.ini with ./prterm-ini or with their editor. */
 
             if (!sess.valid) {
                 json_err(res, pr_tr(cfg->language, "login required"));

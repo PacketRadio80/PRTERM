@@ -6,20 +6,29 @@
  * byte the daemon writes to the device. What is checked here is
  * exactly the repair of the TNC2C - KISS held like in the MAX25-Stack:
  *
- *   - KISS is entered ONCE and held: leave KISS (C0 FF C0) -> MYCALL
- *     -> KISS entry -> KISS parameters, in that order
+ *   - KISS is entered ONCE and held: probe -> MYCALL -> KISS entry
+ *     -> entry VERIFIED (the probe must stay silent in KISS mode)
+ *     -> KISS parameters, in that order
+ *   - NO blind C0 FF C0 at cold start - on TheFirmware that is a
+ *     firmware reset, and commands sent during the boot are lost
+ *     (the false "KISS held" with a deaf PTT)
+ *   - CHECKUP of a held KISS repairs in place: leave (C0 FF C0) ->
+ *     boot settle -> probe -> MYCALL -> entry -> verify -> parameters,
+ *     the port is never closed (a closing fd drops DTR)
  *   - TX relays the KISS frame unchanged and writes NOTHING else -
  *     in KISS mode every written byte would be a transmission
  *   - RX passes received bytes through unchanged
- *   - CHECKUP repairs in place: leave KISS again, re-enter, the port
- *     is never closed (a closing fd drops DTR)
  *   - shutdown leaves KISS with the return frame
+ *
+ * The fake TNC models KISS mode: after the entry of its class it
+ * ignores terminal probes (like the real firmware, whose KISS parser
+ * drops bytes outside frames); only C0 FF C0 brings the banner back.
  *
  * Both device classes are run, because they do not speak the same
  * command language (docs/TNC-INIT.md):
  *
  *   esc   TheFirmware (Landolt TNC2C): probe ESC V,  MYCALL as "ESC I"
- *   tapr  TAPR class (PK-TNC2):        probe INFO,  MYCALL as command
+ *   tapr  TAPR class:                  probe INFO,  MYCALL as command
  *
  * The fake TNC answers only the probe of ITS class and never the other
  * one - a daemon with the wrong probe gets no answer and would have to
@@ -93,12 +102,14 @@ static size_t find_at(const unsigned char *buf, size_t len,
 
 /*
  * Reads what the daemon writes to the device, records every byte and
- * answers the probe of ITS device class - and only that one. No more:
- * a real TNC in command mode says nothing to anything else either.
+ * answers the probe of ITS device class - and only that one, and only
+ * in terminal mode. In KISS mode the firmware ignores terminal bytes
+ * (no FEND, no frame); C0 FF C0 resets it back to the banner.
  */
 static void fake_tnc_run(int master, const char *recpath, bool tapr)
 {
     int rec = open(recpath, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    bool in_kiss = false;
 
     for (;;) {
         unsigned char buf[512];
@@ -114,12 +125,32 @@ static void fake_tnc_run(int master, const char *recpath, bool tapr)
         if (rec >= 0)
             (void)write(rec, buf, (size_t)n);
 
-        /* The probe of the class. C0 FF C0 is the KISS return - on
-         * TheFirmware a firmware reset, which brings the banner. */
+        /* C0 FF C0 - the KISS return. On TheFirmware a firmware
+         * reset: the banner comes and KISS mode is gone. */
+        if (memfind(buf, (size_t)n, "\xc0\xff\xc0", 3) != NULL) {
+            in_kiss = false;
+            (void)write(master, fake_banner, sizeof fake_banner - 1);
+            continue;
+        }
+
+        /* In KISS mode the device speaks frames only - terminal
+         * probes are ignored. */
+        if (in_kiss)
+            continue;
+
+        /* The KISS entry of the class switches the mode. */
+        bool enter = tapr
+            ? memfind(buf, (size_t)n, "kiss on\r", 8) != NULL
+            : memfind(buf, (size_t)n, "\x1b@K", 3) != NULL;
+        if (enter) {
+            in_kiss = true;
+            continue;
+        }
+
+        /* The probe of the class - answered in terminal mode only. */
         bool probe = tapr ? memfind(buf, (size_t)n, "INFO", 4) != NULL
                           : memfind(buf, (size_t)n, "\x1bV", 2) != NULL;
-        bool reset = memfind(buf, (size_t)n, "\xc0\xff\xc0", 3) != NULL;
-        if (probe || reset)
+        if (probe)
             (void)write(master, fake_banner, sizeof fake_banner - 1);
     }
 
@@ -242,7 +273,7 @@ static void run_scenario(const char *daemon, const char *tag,
 
     /* ---- wait for the socket ----------------------------------------
      * The daemon opens KISS first and only then offers its socket -
-     * that takes a few seconds (leave KISS, probe, MYCALL, entry). */
+     * that takes a few seconds (probe, MYCALL, entry, verify). */
     pr_tncsock c;
     memset(&c, 0, sizeof c);
     c.fd = -1;
@@ -354,6 +385,11 @@ static void run_scenario(const char *daemon, const char *tag,
                 unsigned char ui4[64];
                 size_t uilen4 = ax25_ui_frame(ui4, sizeof ui4, "DX1ABC", "CQ",
                                               (const unsigned char *)"moin2", 5);
+                /* The device passes received frames WITH the FCS
+                 * trailer - the driver must validate and strip it. */
+                uint16_t fcs4 = kiss_fcs(ui4, uilen4);
+                ui4[uilen4++] = (unsigned char)(fcs4 & 0xFF);
+                ui4[uilen4++] = (unsigned char)(fcs4 >> 8);
                 unsigned char frame4[128];
                 size_t flen4 = kiss_encode(frame4, sizeof frame4, 0,
                                            KISS_CMD_DATA, ui4, uilen4);
@@ -422,7 +458,6 @@ static void run_scenario(const char *daemon, const char *tag,
     static const unsigned char txtail[]  = { 0xC0, 0x04, 0x0A, 0xC0 };
     static const unsigned char fulld[]   = { 0xC0, 0x05, 0x00, 0xC0 };
 
-    size_t o_leave = find_at(rec, rlen, (const char *)leave, 3, 0);
     size_t o_call  = find_at(rec, rlen, (const char *)mycall, mlen, 0);
     size_t o_atk   = find_at(rec, rlen,
                              tapr ? (const char *)kiss_on : (const char *)at_k,
@@ -433,15 +468,15 @@ static void run_scenario(const char *daemon, const char *tag,
     size_t o_tail  = find_at(rec, rlen, (const char *)txtail, 4, 0);
     size_t o_fd    = find_at(rec, rlen, (const char *)fulld, 4, 0);
 
-    /* 1. leave KISS first - a control frame, nothing on the air */
-    CHECK(o_leave != (size_t)-1);
-    /* 2. MYCALL in the language of the class                   */
+    /* 1. Cold start enters KISS WITHOUT a preceding C0 FF C0 - on
+     *    TheFirmware that is a firmware reset, and resetting a
+     *    terminal-mode device only buys a boot race. MYCALL comes
+     *    in the language of the class, then the KISS entry. */
     CHECK(o_call != (size_t)-1);
-    /* 3. then the KISS entry of the class                      */
     CHECK(o_atk != (size_t)-1);
-    CHECK(o_leave < o_call && o_call < o_atk);
+    CHECK(o_call < o_atk);
 
-    /* 4. then the channel access parameters                    */
+    /* 2. then the channel access parameters                    */
     CHECK(o_txd != (size_t)-1);
     CHECK(o_slot != (size_t)-1);
     CHECK(o_pers != (size_t)-1);
@@ -455,15 +490,23 @@ static void run_scenario(const char *daemon, const char *tag,
     CHECK(memfind(rec, rlen, (const char *)ladder_jhost,
                   sizeof ladder_jhost) == NULL);
 
-    /* CHECKUP ran again: leave KISS + entry a second time       */
-    size_t o_leave2 = find_at(rec, rlen, (const char *)leave, 3, o_leave + 3);
+    /* 3. CHECKUP repairs a HELD KISS: the first C0 FF C0 in the
+     *    record may only come from it - after the first entry.
+     *    Then MYCALL and entry a second time, port never closed. */
+    size_t o_leave = find_at(rec, rlen, (const char *)leave, 3, 0);
+    CHECK(o_leave != (size_t)-1);
+    CHECK(o_atk < o_leave);
+    size_t o_call2 = find_at(rec, rlen, (const char *)mycall, mlen,
+                             o_leave + 3);
     size_t o_atk2 = find_at(rec, rlen,
                             tapr ? (const char *)kiss_on : (const char *)at_k,
-                            tapr ? sizeof kiss_on : sizeof at_k, o_atk + 3);
-    CHECK(o_leave2 != (size_t)-1);
+                            tapr ? sizeof kiss_on : sizeof at_k,
+                            o_leave + 3);
+    CHECK(o_call2 != (size_t)-1);
     CHECK(o_atk2 != (size_t)-1);
+    CHECK(o_leave < o_call2 && o_call2 < o_atk2);
 
-    /* Shutdown: the daemon leaves KISS with the return frame    */
+    /* 4. Shutdown: the daemon leaves KISS with the return frame */
     CHECK(rlen >= 3);
     CHECK(memcmp(rec + rlen - 3, leave, 3) == 0);
 }

@@ -37,6 +37,7 @@
 #include "serial.h"
 #include "tncsock.h"
 #include "state.h"
+#include "trace.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -123,7 +124,13 @@ static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
 /*
  * One received KISS DATA frame = one AX.25 frame.
  *
- * Layout: dest (7) | src (7) | Control (1) | PID (1) | info
+ * Layout: dest (7) | src (7) | Control (1) | PID (1) | info | FCS (2)
+ *
+ * TheFirmware passes received frames WITH the AX.25 FCS trailer
+ * (HyBBX ax25_parse_ui validates it the same way): check it and
+ * strip it. An invalid CRC means a damaged frame on the air and is
+ * dropped deliberately. Frames too short for a trailer are accepted
+ * as they are.
  *
  * Only UI frames with no-layer-3 PID are interesting here. Everything
  * else (connected traffic, digipeater hops) is not part of this
@@ -131,6 +138,14 @@ static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
  */
 static void tnc2_handle_frame(tnc2_impl *t, const unsigned char *frame, size_t len)
 {
+    if (len >= 18) {
+        if (!kiss_fcs_ok(frame, len)) {
+            pr_trace(PR_TR_WARN,
+                     "RX frame dropped - FCS invalid (%zu bytes)", len);
+            return;
+        }
+        len -= 2;
+    }
     if (len < 16)
         return;
 
@@ -195,9 +210,26 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
         snprintf(sock, sizeof sock, "%.400s/tnc-%.32s.sock",
                  cfg->runtime_dir,
                  cfg->active_station[0] ? cfg->active_station : "default");
+        pr_trace_init((pr_trace_level)cfg->debug_level, "cgi");
+        pr_trace(PR_TR_DEBUG, "tnc2 open - daemon socket %s", sock);
         if (pr_tncsock_open(&t->sock, sock, err, errlen) != 0) {
             free(t);
             return -1;
+        }
+    }
+
+    /* The daemon's own view of the link - makes a lost KISS visible
+     * on every request instead of only in the journal. */
+    {
+        char out[PR_TNCSOCK_MAX_LINE], e3[128];
+        if (pr_tncsock_cmd(&t->sock, PR_TNC_CMD_STATUS, out, sizeof out,
+                           e3, sizeof e3) == 0) {
+            pr_trace(PR_TR_DEBUG, "daemon: %s", out);
+            if (strstr(out, "kiss=lost") != NULL)
+                pr_trace(PR_TR_WARN,
+                         "daemon reports KISS lost - watch will repair");
+        } else {
+            pr_trace(PR_TR_WARN, "daemon STATUS failed: %s", e3);
         }
     }
     (void)databits; (void)parity; (void)stopbits;
@@ -231,6 +263,9 @@ static int tnc2_open(pr_rig *r, char *err, size_t errlen)
     pr_strlcpy(t->st.detail, "TNC2 / KISS", sizeof t->st.detail);
     t->st.link_ok = true;
     t->st.duplex  = cfg->duplex;
+    /* Per-station mode from the INI is authoritative (like duplex);
+     * the compliance gate and the state view must agree with it. */
+    t->st.mode    = cfg->mode;
     pr_strlcpy(t->mycall, cfg->callerid, sizeof t->mycall);
     pr_strlcpy(t->station, cfg->active_station, sizeof t->station);
 
@@ -292,7 +327,10 @@ static int tnc2_refresh(pr_rig *r, char *err, size_t errlen)
          * Everything that is not framed (prompts, banners of a
          * repairing device) is ignored by the decoder on purpose.
          */
+        pr_trace_hex(PR_TR_TRACE, "KISS<< (daemon)", buf, (size_t)n);
         size_t frames = kiss_decoder_feed_buf(&t->dec, buf, (size_t)n);
+        if (frames > 0)
+            pr_trace(PR_TR_DEBUG, "RX %zu KISS frame(s) decoded", frames);
         for (size_t i = 0; i < frames; i++) {
             unsigned char frame[KISS_FRAME_MAX];
             size_t flen = kiss_decoder_take(&t->dec, frame, sizeof frame);
@@ -384,7 +422,9 @@ static int tnc2_set_duplex(pr_rig *r, pr_duplex d, char *err, size_t errlen)
     size_t n = kiss_encode(frame, sizeof frame, 0, KISS_CMD_FULLDUPLEX, &v, 1);
     if (n > 0) {
         char e2[64];
-        (void)pr_tncsock_tx(&t->sock, frame, n, e2, sizeof e2);
+        pr_trace_hex(PR_TR_TRACE, "KISS>> FULLDUPLEX", frame, n);
+        if (pr_tncsock_tx(&t->sock, frame, n, e2, sizeof e2) != 0)
+            pr_trace(PR_TR_WARN, "FULLDUPLEX parameter not delivered: %s", e2);
     }
 
     tnc2_save(r, t);
@@ -440,18 +480,26 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
         pr_trf(err, errlen, "frame could not be built");
         return -1;
     }
+    pr_trace_hex(PR_TR_DEBUG, "AX25 UI frame", ui, uilen);
 
     /* KISS frame: FEND | 0x00 | escaped payload | FEND
-     * The FCS is NOT included - the TNC computes and adds it. */
+     * The FCS is NOT included - the TNC computes and adds it on the
+     * air (MAX25 kiss_bridge.py strips a valid trailer the same way).
+     */
     unsigned char frame[640];
     size_t flen = kiss_encode(frame, sizeof frame, 0, KISS_CMD_DATA, ui, uilen);
     if (flen == 0) {
         pr_trf(err, errlen, "KISS frame too large");
         return -1;
     }
+    pr_trace_hex(PR_TR_TRACE, "KISS>> DATA", frame, flen);
 
-    if (pr_tncsock_tx(&t->sock, frame, flen, err, errlen) != 0)
+    if (pr_tncsock_tx(&t->sock, frame, flen, err, errlen) != 0) {
+        pr_trace(PR_TR_ERROR, "TX failed: %s", err);
         return -1;
+    }
+    pr_trace(PR_TR_INFO, "TX %.9s -> %.9s: %zu bytes handed to the daemon",
+             from, to, flen);
 
     tnc2_note(r, PR_MSG_TX, from, text);
     t->st.tx_count++;
@@ -519,6 +567,8 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
     long frames = (bytes_needed + per_frame - 1) / per_frame;
     if (frames < 1) frames = 1;
     if (frames > 40) frames = 40;
+    pr_trace(PR_TR_DEBUG, "carrier test %u s at %ld baud - %ld frame(s)",
+             seconds, baud, frames);
 
     unsigned char pad[TNC2_PACLEN];
     memset(pad, 0, sizeof pad);
@@ -541,6 +591,8 @@ static int tnc2_carrier_test(pr_rig *r, unsigned seconds,
         }
 
         if (pr_tncsock_tx(&t->sock, frame, flen, err, errlen) != 0) {
+            pr_trace(PR_TR_ERROR, "carrier test frame %ld failed: %s",
+                     k + 1, err);
             t->st.ptt = false;
             t->st.rx_muted = false;
             return -1;

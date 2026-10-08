@@ -6,6 +6,7 @@
 #include "prterm_compat.h"
 
 #include "config.h"
+#include "trace.h"
 #include "testutil.h"
 
 #include <stdlib.h>
@@ -42,6 +43,9 @@ static const char *INI =
     "density = compact\n"
     "theme = silver\n"
     "\n"
+    "[debug]\n"
+    "level = trace\n"
+    "\n"
     "[ban]\n"
     "DL9* = Spam\n"
     "KB1ABC-3 = Stoerer\n";
@@ -58,6 +62,7 @@ int main(void)
     CHECK_STR(d.callerid, "PRTERM-1");
     CHECK_INT(d.tx_power_mw, 4000L);
     CHECK(d.duplex == PR_DUPLEX_FULL);
+    CHECK_INT(d.debug_level, PR_TR_WARN);
     pr_config_free(&d);
 
     printf("\n== applying ==\n");
@@ -76,6 +81,7 @@ int main(void)
     CHECK_INT(c.tx_power_mw, 4000L);
     CHECK(c.duplex == PR_DUPLEX_FULL);
     CHECK_INT(c.mode, PR_BAND_AM);
+    CHECK_INT(c.debug_level, PR_TR_TRACE);
 
     /* Font: size + line spacing in percent        */
     CHECK_STR(c.font_file, "./fonts/test.ttf");
@@ -118,12 +124,36 @@ int main(void)
         pr_config_free(&t);
         ini_free(bad);
     }
+
     {
         ini *bad = ini_parse("[radio]\nmode = xyz\n", err, sizeof err);
         pr_config t;
         CHECK(pr_config_apply(&t, bad, err, sizeof err) != 0);
         pr_config_free(&t);
         ini_free(bad);
+    }
+
+    printf("\n== per-station mode ==\n");
+    {
+        ini *si = ini_parse("[radio]\nmode = fm\n"
+                            "[station:s1]\nport = /dev/null\nmode = am\n"
+                            "[station:s2]\nport = /dev/null\n",
+                            err, sizeof err);
+        pr_config sc;
+        CHECK(si != NULL);
+        CHECK_INT(pr_config_apply(&sc, si, err, sizeof err), 0);
+        CHECK_INT(sc.nstations, 2);
+        CHECK_INT(sc.stations[0].mode, PR_BAND_AM);
+        CHECK_INT(sc.stations[1].mode, 0);          /* inherits */
+        /* s1: its own mode wins */
+        CHECK(pr_config_apply_station(&sc, "s1") != NULL);
+        CHECK_INT(sc.mode, PR_BAND_AM);
+        /* s2: the global [radio] mode stays */
+        sc.mode = PR_BAND_FM;
+        CHECK(pr_config_apply_station(&sc, "s2") != NULL);
+        CHECK_INT(sc.mode, PR_BAND_FM);
+        pr_config_free(&sc);
+        ini_free(si);
     }
 
     printf("\n== write-back ==\n");
@@ -134,6 +164,7 @@ int main(void)
         CHECK_STR(ini_get(out, "radio", "mode", "?"), "fm");
         CHECK_INT(ini_get_int(out, "radio", "tx_power_mw", 0), 4000L);
         CHECK_INT(ini_get_int(out, "ui", "font_size", 0), 16);
+        CHECK_STR(ini_get(out, "debug", "level", "?"), "trace");
         ini_free(out);
     }
 

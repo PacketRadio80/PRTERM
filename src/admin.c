@@ -104,19 +104,135 @@ static void act_save_station(pr_request *req, pr_response *res, pr_config *cfg)
     if (persist(cfg, res)) json_ok(res);
 }
 
-static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
+/*
+ * Per-device save: writes ONE [station:NAME] section in prterm.ini.
+ *
+ * The Radio card on the admin page still edits the global [radio] defaults
+ * (duplex / freq_hz / tx_power_mw — these are channel-level, shared by every
+ * device on the bus). Devices are station-level: each [station:NAME] has its
+ * own driver, port, baud, modem, line, kiss_init, mode, callerid, antenna.
+ *
+ * Form fields:
+ *   name         — the station key ([station:NAME])
+ *   driver       — driver name from pr_rig_find()
+ *   port         — serial device path
+ *   baud         — 300..4_000_000
+ *   modem        — "tcm3105", "afsk", ...
+ *   serial_line  — "8n1"
+ *   kiss_init    — "esc" | "auto" | "tapr"
+ *   mode         — "fm" | "am" | "ssb" | "" (inherit the [radio] mode)
+ *   freq_hz      — per-station frequency in Hz; 0/empty means inherit [radio]
+ *   callerid     — per-device source callsign (validated if non-empty)
+ *   antenna      — free-form description (display only)
+ *   enabled      — "yes"/"no"
+ */
+static void act_save_station_radio(pr_request *req, pr_response *res, pr_config *cfg)
 {
     char err[256];
+
+    const char *name = arg(req, "name");
+    if (name[0] == '\0') {
+        json_err(res, pr_tr(cfg->language, "missing station name"));
+        return;
+    }
+    size_t sidx = (size_t)-1;
+    for (size_t i = 0; i < cfg->nstations; i++) {
+        if (pr_str_eq_ci(cfg->stations[i].name, name)) { sidx = i; break; }
+    }
+    if (sidx == (size_t)-1) {
+        json_err(res, pr_tr(cfg->language, "unknown station"));
+        return;
+    }
 
     const char *driver = arg(req, "driver");
     if (pr_rig_find(driver) == NULL) {
         json_err(res, pr_tr(cfg->language, "unknown rig driver"));
         return;
     }
+    const char *kiss = arg(req, "kiss_init");
+    if (strcmp(kiss, "esc") != 0 && strcmp(kiss, "auto") != 0 && strcmp(kiss, "tapr") != 0) {
+        json_err(res, pr_tr(cfg->language, "kiss_init must be \"esc\", \"auto\" or \"tapr\""));
+        return;
+    }
+    const char *mode = arg(req, "mode");
+    bool inherit_mode = (mode[0] == '\0' || strcmp(mode, "inherit") == 0);
+    if (!inherit_mode && pr_band_mode_from_name(mode) == 0u) {
+        json_err(res, pr_tr(cfg->language, "mode must be \"fm\", \"am\", \"ssb\" or \"inherit\""));
+        return;
+    }
 
-    const char *duplex = arg(req, "duplex");
-    if (strcmp(duplex, "full") != 0 && strcmp(duplex, "half") != 0) {
-        json_err(res, pr_tr(cfg->language, "duplex must be \"full\" or \"half\""));
+    long baud = pr_parse_long(arg(req, "baud"), 0, NULL);
+    if (baud != 0 && (baud < 300 || baud > 4000000)) {
+        json_err(res, pr_tr(cfg->language, "baud must be between 300 and 4 000 000"));
+        return;
+    }
+
+    /* Per-station frequency (Hz). 0 = inherit the global [radio]
+     * freq_hz. Empty form input also reads as 0. Compliance for the
+     * typed value is checked at TX time, not save time - same reasoning
+     * as in act_save_radio, just per station. */
+    long want_freq = pr_parse_long(arg(req, "freq_hz"), 0, NULL);
+    if (want_freq != 0) {
+        const pr_channel *ch = pr_bandplan_at_freq(cfg->bandplan, want_freq);
+        if (ch == NULL) {
+            pr_trf(err, sizeof err,
+                    "%.3f MHz is not on an allocated channel",
+                    want_freq / 1000000.0);
+            json_err(res, err);
+            return;
+        }
+    }
+
+    char sec[64];
+    snprintf(sec, sizeof sec, "station:%s", name);
+
+    ini_set(cfg->raw, sec, "rig_driver", driver);
+    ini_set(cfg->raw, sec, "port", arg(req, "port"));
+    if (baud != 0)
+        ini_set_int(cfg->raw, sec, "baud", baud);
+    ini_set(cfg->raw, sec, "modem", arg(req, "modem"));
+    ini_set(cfg->raw, sec, "serial_line", arg(req, "serial_line"));
+    ini_set(cfg->raw, sec, "kiss_init", kiss);
+    if (inherit_mode)
+        ini_del(cfg->raw, sec, "mode");
+    else
+        ini_set(cfg->raw, sec, "mode", mode);
+
+    /*
+     * Per-station frequency. Empty string or "0" in the form means
+     * "inherit [radio] freq_hz" - we DELETE the key so the parser
+     * sees absence and falls back. A real typed value is stored verbatim.
+     */
+    if (want_freq == 0)
+        ini_del(cfg->raw, sec, "freq_hz");
+    else
+        ini_set_int(cfg->raw, sec, "freq_hz", want_freq);
+
+    const char *cid = arg(req, "callerid");
+    if (cid[0] != '\0') {
+        char call[PR_CALLSIGN_MAX];
+        if (!callerid_normalize(call, sizeof call, cid, &cfg->callsign)) {
+            json_err(res, pr_tr(cfg->language, "CALLERID for this device is invalid"));
+            return;
+        }
+        ini_set(cfg->raw, sec, "callerid", call);
+    }
+
+    /* "antenne" matches the parser in config.c — that spelling was carried
+     * through every shipped sample. Renaming would orphan existing INI files;
+     * we keep the typo at the wire level and correct it in the UI label only. */
+    ini_set(cfg->raw, sec, "antenne", arg(req, "antenna"));
+    ini_set_bool(cfg->raw, sec, "enabled",
+                 pr_parse_bool(arg(req, "enabled"), cfg->stations[sidx].enabled));
+
+    if (persist(cfg, res)) json_ok(res);
+}
+
+static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
+{
+    const char *driver = arg(req, "driver");
+    if (pr_rig_find(driver) == NULL) {
+        json_err(res, pr_tr(cfg->language, "unknown rig driver"));
         return;
     }
 
@@ -128,37 +244,29 @@ static void act_save_radio(pr_request *req, pr_response *res, pr_config *cfg)
         return;
     }
 
-    long freq = pr_parse_long(arg(req, "freq_hz"), 0, NULL);
-    long pwr  = pr_parse_long(arg(req, "tx_power_mw"), 0, NULL);
     long baud = pr_parse_long(arg(req, "baud"), 0, NULL);
 
-    /* Compliance BEFORE saving     */
-    if (freq > 0) {
-        const pr_channel *ch = pr_bandplan_at_freq(cfg->bandplan, freq);
-        if (ch == NULL) {
-            pr_trf(err, sizeof err,
-                    "%.3f MHz is not on an allocated channel",
-                    freq / 1000000.0);
-            json_err(res, err);
-            return;
-        }
-        if (pwr > 0 && !pr_bandplan_tx_allowed(cfg->bandplan, freq,
-                                               ch->modes & mode_bit ? mode_bit : PR_BAND_FM,
-                                               pwr, err, sizeof err)) {
-            json_err(res, err);
-            return;
-        }
-    }
+    /*
+     * Frequency and TX power are NOT edited via this form. The form
+     * fields for [radio] freq_hz / tx_power_mw were removed from the UI
+     * on 2026-10-08. Compliance for those values now happens at TX time
+     * (app_tx_gate) - the loaded INI value is what counts, and a wrong
+     * value never reaches the air. We therefore do not read or write
+     * freq_hz / tx_power_mw here.
+     *
+     * Duplex is NOT edited via this form either (2026-10-08). The
+     * field on the global [radio] section is still kept in the struct
+     * and the INI file (operators can change it with prterm-ini), but
+     * no admin form exposes it any more. The same compliance story
+     * applies: values that go on air are checked at TX time against
+     * the loaded INI.
+     */
 
     ini_set(cfg->raw, "radio", "driver", driver);
     ini_set(cfg->raw, "radio", "port", arg(req, "port"));
-    ini_set(cfg->raw, "radio", "duplex", duplex);
     ini_set(cfg->raw, "radio", "mode", mode);
     if (baud >= 300 && baud <= 4000000)
         ini_set_int(cfg->raw, "radio", "baud", baud);
-    if (freq > 0)
-        ini_set_int(cfg->raw, "radio", "freq_hz", freq);
-    ini_set_int(cfg->raw, "radio", "tx_power_mw", pwr);
 
     if (persist(cfg, res)) json_ok(res);
 }
@@ -313,44 +421,24 @@ static void act_pass_change(pr_request *req, pr_response *res, pr_config *cfg,
     }
 }
 
-static void act_config_save(pr_request *req, pr_response *res, pr_config *cfg)
-{
-    const char *text = arg(req, "text");
-
-    char err[256];
-    ini *fresh = ini_parse(text, err, sizeof err);
-    if (fresh == NULL) {
-        json_err(res, err);
-        return;
-    }
-
-    /* Validate first, then replace - otherwise a broken file remains.  */
-    pr_config test;
-    if (pr_config_apply(&test, fresh, err, sizeof err) != 0) {
-        json_err(res, err);
-        ini_free(fresh);
-        pr_config_free(&test);
-        return;
-    }
-    pr_config_free(&test);
-
-    if (ini_save(fresh, cfg->ini_path, err, sizeof err) != 0) {
-        json_err(res, err);
-        ini_free(fresh);
-        return;
-    }
-    ini_free(fresh);
-
-    pr_config loaded;
-    if (pr_config_load(&loaded, cfg->ini_path, err, sizeof err) != 0) {
-        json_err(res, err);
-        pr_config_free(&loaded);
-        return;
-    }
-    pr_config_free(cfg);
-    *cfg = loaded;
-    json_ok(res);
-}
+/* act_config_save REMOVED 2026-10-08.
+ *
+ * The raw INI save action was tied to the textarea in the admin UI. That
+ * textarea is gone — editing prterm.ini with ./prterm-ini (set/del/has-
+ * section) or directly with an editor is the canonical path. The handler
+ * would silently accept any malformed text and overwrite the file
+ * contents, which is exactly what the textarea dump had already prepared:
+ * the comments and ordering were flattened on the roundtrip.
+ */
+/* act_set_station_freq REMOVED 2026-10-08.
+ *
+ * Sat an die per-device "Device channel:" -Karten im Admin-Bereich,
+ * die wiederum die Kanalnummer als UI-Element verfügbar machten. Beide
+ * wurden entfernt: PRTERM arbeitet nur noch in Frequenzen, die Bandplan-
+ * Nummern sind weiterhin intern im Compliance-Code aktiv (arithmetische
+ * Modus/TX-Power-Prüfung gegen die in [station:NAME] freq_hz geladene
+ * Frequenz), aber sie werden nicht mehr als UI-Werte exponiert.
+ */
 
 /* ======================================================================= */
 /* Dispatcher                                                              */
@@ -368,12 +456,13 @@ int pr_admin_action(pr_request *req, pr_response *res,
     if      (strcmp(action, "save_site")    == 0) act_save_site(req, res, cfg);
     else if (strcmp(action, "save_station") == 0) act_save_station(req, res, cfg);
     else if (strcmp(action, "save_radio")   == 0) act_save_radio(req, res, cfg);
+    else if (strcmp(action, "save_station_radio") == 0) act_save_station_radio(req, res, cfg);
     else if (strcmp(action, "save_callsign")== 0) act_save_callsign(req, res, cfg);
     else if (strcmp(action, "save_ui")      == 0) act_save_ui(req, res, cfg);
     else if (strcmp(action, "ban_add")      == 0) act_ban_add(req, res, cfg);
     else if (strcmp(action, "ban_del")      == 0) act_ban_del(req, res, cfg);
     else if (strcmp(action, "pass_change")  == 0) act_pass_change(req, res, cfg, sess);
-    else if (strcmp(action, "config_save")  == 0) act_config_save(req, res, cfg);
+    /* action=config_save REMOVED: see comment above act_config_save. */
     else json_err(res, pr_tr(cfg->language, "unknown action"));
 
     return 0;

@@ -41,7 +41,22 @@ typedef struct pr_station {
     long radio_baud;               /* FIXED - hardware, not changeable   */
     char modem[32];
     char serial_line[8];
-    char kiss_init[16];           /* "esc" or "tapr" - see radio.h     */
+    char kiss_init[16];           /* "esc", "auto" or "tapr" - radio.h  */
+    /*
+     * Per-station modulation: PR_BAND_FM / _AM / _SSB, or 0 = inherit
+     * the global [radio] mode. The compliance gate checks THIS value
+     * per station (AM only on channels 1-40, SSB 12 W, FM/PM 4 W).
+     */
+    unsigned mode;
+    /*
+     * Per-station frequency (Hz), or 0 = inherit [radio] freq_hz.
+     * Operators can give each station its own channel when the rig
+     * supports multiple radios on different offsets (cross-band,
+     * local-repeater, experimental band, ...). The compliance check
+     * runs against this value when a station is active; the legal
+     * band plan is the same on every station.
+     */
+    long freq_hz;
     char callerid[PR_CALLSIGN_MAX];
     char antenna[64];              /* Description, for display             */
     bool enabled;
@@ -82,11 +97,15 @@ typedef struct pr_config {
     /*
      * How the TNC is put into KISS mode. The devices differ here,
      * see docs/TNC-INIT.md:
-     *   esc   1B 40 4B  (ESC @K, no \r)     - Landolt TNC2C
-     *   tapr  "kiss on\r"                   - PK-TNC2, TAPR class
+     *   esc   1B 40 4B  (ESC @K, no \r)     - Landolt TNC2C (TheFirmware)
+     *   auto  ESC @K, repeated when the firmware answers only the
+     *         text "kiss on"                - PK-TNC2 (TheFirmware class)
+     *   tapr  "kiss on\r"                   - real TAPR class only
      *
      * KISS is then HELD - prterm-tncd enters it once and transmits
-     * with KISS DATA frames. There is no switching for a send.
+     * with KISS DATA frames. There is no switching for a send. The
+     * entry is VERIFIED: a device that still answers the terminal
+     * probe has not entered KISS - its PTT would never key.
      */
     char kiss_init[16];
     long freq_hz;
@@ -118,6 +137,26 @@ typedef struct pr_config {
      * (/var/mailboxd, /usr/mailboxd, /usr/local/mailboxd).
      */
     char mailboxd_dir[PR_CFG_PATH];
+
+    /*
+     * [debug]
+     *
+     * Trace level for daemon and driver (pr_trace_level, see trace.h):
+     * off | error | warn | info | debug | trace. "trace" hexdumps
+     * every serial/socket byte - the wire protocol becomes visible
+     * in journalctl (daemon) and the webserver error log (CGI).
+     */
+    int debug_level;
+
+    /*
+     * [daemon] NO-AUTO-TX controls (2026-10-08).
+     *
+     *   resend_kiss_params = yes|no    default: no
+     *     opt-in: re-emit the KISS CSMA parameter set after a repair.
+     *     Default "no" so firmware quirks that misread KISS PARAM bytes
+     *     as data do NOT cause a spurious PTT keying.
+     */
+    bool resend_kiss_params;
 
     /* [callsign] */
     pr_call_rules callsign;

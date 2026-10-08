@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "lang.h"
+#include "trace.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -74,6 +75,20 @@ void pr_config_defaults(pr_config *cfg)
     /* [mailboxd] - off until the operator turns it on */
     cfg->mailboxd_enabled = false;
     pr_strlcpy(cfg->mailboxd_dir, "/var/mailboxd", sizeof cfg->mailboxd_dir);
+
+    /* [debug] - quiet by default, the journal stays readable */
+    cfg->debug_level = PR_TR_WARN;
+
+    /*
+     * [daemon] - NO-AUTO-TX controls (2026-10-08).
+     *
+     *   resend_kiss_params = yes|no    default: no
+     *     Re-write the KISS CSMA parameters after a repair. Off by
+     *     default to prevent spurious PTT keying on firmware that
+     *     treats KISS-PARAM bytes as data. Cold-start writes happen
+     *     regardless - the door is "every repair after that".
+     */
+    cfg->resend_kiss_params = false;
 
     pr_call_rules_default(&cfg->callsign);
 
@@ -152,6 +167,14 @@ static void apply_stations(pr_config *cfg, const ini *i)
         copy_str(st->serial_line, sizeof st->serial_line, i, sec, "line", "8n1");
         copy_str(st->kiss_init, sizeof st->kiss_init, i, sec, "kiss_init", "esc");
         pr_lower(st->kiss_init);
+        /* Per-station FM/AM/SSB switch; absent or invalid = inherit [radio]. */
+        st->mode = pr_band_mode_from_name(ini_get(i, sec, "mode", ""));
+        /*
+         * Per-station frequency (Hz), or 0 = inherit the global
+         * [radio] freq_hz. The channel is normally shared, so most
+         * deployments leave this absent.
+         */
+        st->freq_hz = clamp_long(ini_get_int(i, sec, "freq_hz", 0), 0, 999999999L);
         copy_str(st->antenna, sizeof st->antenna, i, sec, "antenne", "");
         st->enabled = ini_get_bool(i, sec, "enabled", true);
 
@@ -246,6 +269,14 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     cfg->mailboxd_enabled = ini_get_bool(i, "mailboxd", "enabled", false);
     copy_str(cfg->mailboxd_dir, sizeof cfg->mailboxd_dir,
              i, "mailboxd", "dir", "/var/mailboxd");
+
+    /* [daemon] NO-AUTO-TX door. */
+    cfg->resend_kiss_params = ini_get_bool(
+        i, "daemon", "resend_kiss_params", false);
+
+    /* [debug] */
+    cfg->debug_level = pr_trace_level_from_name(
+        ini_get(i, "debug", "level", "warn"), PR_TR_WARN);
 
     /* [ui] */
     copy_str(cfg->font_file, sizeof cfg->font_file, i, "ui", "font_file", "");
@@ -351,6 +382,9 @@ void pr_config_write(const pr_config *cfg, ini *i)
 
     ini_set_bool(i, "mailboxd", "enabled", cfg->mailboxd_enabled);
     ini_set(i, "mailboxd", "dir", cfg->mailboxd_dir);
+
+    ini_set(i, "debug", "level",
+            pr_trace_level_name((pr_trace_level)cfg->debug_level));
 
     ini_set_int(i, "callsign", "callid_max_len", cfg->callsign.callid_max_len);
     ini_set_int(i, "callsign", "callerid_base_len", cfg->callsign.callerid_base_len);
@@ -489,8 +523,10 @@ const pr_station *pr_config_apply_station(pr_config *cfg, const char *name)
         return NULL;
 
     /*
-     * Take over only the device settings. Frequency and channel
-     * apply to all stations on the same channel.
+     * Take over the device settings. Frequency and channel are
+     * normally shared; per-station override is supported via
+     * [station:NAME] freq_hz (cross-band operation, local repeater,
+     * test exp channel, ...). 0 in the station means "inherit [radio]".
      */
     pr_strlcpy(cfg->port, st->port, sizeof cfg->port);
     cfg->baud = st->baud;
@@ -498,6 +534,10 @@ const pr_station *pr_config_apply_station(pr_config *cfg, const char *name)
     pr_strlcpy(cfg->modem, st->modem, sizeof cfg->modem);
     pr_strlcpy(cfg->serial_line, st->serial_line, sizeof cfg->serial_line);
     pr_strlcpy(cfg->kiss_init, st->kiss_init, sizeof cfg->kiss_init);
+    if (st->mode != 0)
+        cfg->mode = st->mode;      /* per-station mode wins over [radio] */
+    if (st->freq_hz > 0)
+        cfg->freq_hz = st->freq_hz; /* per-station freq wins over [radio] */
     pr_strlcpy(cfg->rig_driver, st->rig_driver, sizeof cfg->rig_driver);
     pr_strlcpy(cfg->callerid, st->callerid, sizeof cfg->callerid);
     pr_strlcpy(cfg->active_station, st->name, sizeof cfg->active_station);

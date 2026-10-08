@@ -96,6 +96,7 @@ prterm_embed_asset(prterm.js  prterm_js  PRTERM_JS_SRC)
 # ---------------------------------------------------------------------------
 set(PRTERM_CORE_SOURCES
     src/util.c
+    src/trace.c
     src/sha256.c
     src/ini.c
     src/bands.c
@@ -179,7 +180,7 @@ endif()
 # Tests
 # ---------------------------------------------------------------------------
 if(BUILD_TESTING)
-    foreach(_t ini bands callsign config cgi kiss probe state session arbiter ui)
+    foreach(_t ini bands callsign config cgi kiss probe state session arbiter ui trace)
         add_executable(test_${_t} tests/test_${_t}.c)
         target_link_libraries(test_${_t} PRIVATE prterm_core)
         target_compile_options(test_${_t} PRIVATE ${PRTERM_WARN_FLAGS})

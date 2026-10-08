@@ -159,6 +159,7 @@ static int sim_open(pr_rig *r, char *err, size_t errlen)
     pr_strlcpy(s->st.detail, "Simulation", sizeof s->st.detail);
     s->st.link_ok = true;
     s->st.duplex  = r->cfg->duplex;
+    s->st.mode    = r->cfg->mode;   /* per-station INI mode is authoritative */
 
     s->last_gen = pr_now_s();
     s->rng = 0x2545F491u ^ (unsigned)pr_now_ms();

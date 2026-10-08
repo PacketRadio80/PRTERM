@@ -68,29 +68,39 @@ With an empty `pass_hash` **no login is possible** — that is the safe state.
 
 ### Web server
 
-One line is enough:
+PRTERM is a standard RFC 3875 CGI binary. Anything that can run a CGI
+serves it unchanged. Ready-made configs for the four we test live:
+
+- [`docs/lighttpd.conf`](docs/lighttpd.conf) + [`docs/lighttpd-systemd.conf`](docs/lighttpd-systemd.conf) — the reference deploy (this host).
+- [`docs/apache.conf`](docs/apache.conf) — Apache 2.4 with `mod_cgi` + `mod_alias`.
+- [`docs/nginx.conf`](docs/nginx.conf) — NGinx bridged through `fcgiwrap`.
+- [`docs/busybox-httpd.conf`](docs/busybox-httpd.conf) — `CONFIG_HTTPD_CGI=y` build, dev only.
+
+The compatibility overview, decision table, and per-server caveats are in
+[`docs/WEB-SERVERS.md`](docs/WEB-SERVERS.md). For the smallest possible snippet:
 
 ```apache
 # Apache
-ScriptAlias /prterm/ /path/to/cgi-bin/
+ScriptAlias /prterm /usr/lib/cgi-bin/prterm/prterm.cgi
 ```
 
 ```nginx
 # nginx + fcgiwrap
-location /prterm.cgi {
+location = /prterm.cgi {
     include fastcgi_params;
     fastcgi_pass unix:/run/fcgiwrap.sock;
+    fastcgi_param SCRIPT_FILENAME /usr/lib/cgi-bin/prterm/prterm.cgi;
 }
 ```
 
 ```sh
 # busybox httpd (for trying it out)
-busybox httpd -p 8080 -h /some/folder
+busybox httpd -p 8080 -h /usr/lib/cgi-bin/prterm -u lighttpd
 ```
 
-No redirects, no WebSocket of its own to configure, no reverse proxy. There is
-also a ready-made [`docs/lighttpd.conf`](docs/lighttpd.conf) with a matching
-systemd unit.
+No redirects, no WebSocket of its own to configure, no reverse proxy. PRTERM
+is one HTML document; links are formed relative to `SCRIPT_NAME`, so the
+script follows whatever path the server gives it.
 
 ---
 
@@ -181,6 +191,7 @@ itself is the reference. Sections:
 | `[admin]` | enable/disable, `pass_hash`, session lifetime |
 | `[callsign]` | CALLID/CALLERID rules (`6+2`) |
 | `[ban]` | blocked call patterns with a reason |
+| `[debug]` | trace level (`off`…`trace`) for daemon and driver — `trace` hexdumps every serial byte into the journal / error log |
 | `[paths]` | runtime directory |
 
 A typical `[radio]` block:
@@ -433,7 +444,7 @@ of v1.0.0.
 ctest --test-dir build --output-on-failure
 ```
 
-Twelve suites, all independent of hardware:
+Thirteen suites, all independent of hardware:
 
 | Suite | Covers |
 |---|---|
@@ -448,7 +459,8 @@ Twelve suites, all independent of hardware:
 | `session` | password hash, the built-in password, sessions and expiry, CSRF, login throttle |
 | `arbiter` | TX arbitration across processes: free channel, busy with owner, per frequency |
 | `ui` | page composition: CALL:/RX/TX:/CQ: in the top bar, `<device>@<freq>@<baud>Baud` entries, send bar, mode/duplex as administration settings, Mailbox tab only when MailboxD is on, all five languages |
-| `tncd` | `prterm-tncd` against a **fake TNC on a pseudo terminal**, both device classes (TheFirmware and TAPR): KISS entry order, frame relay, RX pass-through, in-place repair via `CHECKUP`, leave KISS on shutdown — plus the `tnc2` driver path end to end |
+| `trace` | trace module: level names, filtering, timestamped lines, capped hexdumps |
+| `tncd` | `prterm-tncd` against a **fake TNC on a pseudo terminal**, both device classes (TheFirmware and TAPR): KISS entry order **with entry verification**, no blind firmware reset at cold start, frame relay, RX pass-through, in-place repair via `CHECKUP`, leave KISS on shutdown — plus the `tnc2` driver path end to end incl. FCS validation |
 
 ### Build options
 
@@ -503,6 +515,12 @@ reach the air, not even as a KISS `DATA` frame.
 | [`docs/MULTI-TNC.md`](docs/MULTI-TNC.md) | several complete stations on one channel |
 | [`docs/UI-THEME.md`](docs/UI-THEME.md) | colours and how the look is achieved |
 | [`docs/UI-FONTS.md`](docs/UI-FONTS.md) | fonts and the character grid |
+| [`docs/WEB-SERVERS.md`](docs/WEB-SERVERS.md) | webserver compat (lighttpd, Apache, NGinx, busybox httpd) |
+| [`docs/lighttpd.conf`](docs/lighttpd.conf) | lighttpd config snippet |
+| [`docs/lighttpd-systemd.conf`](docs/lighttpd-systemd.conf) | lighttpd systemd unit snippet |
+| [`docs/apache.conf`](docs/apache.conf) | Apache 2.4 config snippet |
+| [`docs/nginx.conf`](docs/nginx.conf) | NGinx + fcgiwrap config snippet |
+| [`docs/busybox-httpd.conf`](docs/busybox-httpd.conf) | Busybox httpd usage |
 
 ---
 

@@ -39,9 +39,15 @@ Settle 2 s                           # important: do NOT close the port!
 | Profile  | Rig                    | Line    | Baud   | RTS/DTR | KISS entry     |
 | -------- | ---------------------- | ------- | ------ | ------- | -------------- |
 | `tnc2c`  | Landolt TNC2C          | **7E1** | 19200  | on      | `ESC @K`       |
-| `pktnc2` | PK-TNC2                | **8N1** | 9600   | off     | `kiss on\r`    |
+| `pktnc2` | PK-TNC2                | **8N1** | 9600   | off     | `ESC @K` (auto)|
 | `tmodem` | T-Modem (half-TNC)     | 8N1     | 115200 | —       | native KISS    |
 | `generic`| classic TNC2 clones    | 8N1     | 2400   | off     | `kiss on\r`    |
+
+> **PK-TNC2 = TheFirmware TNC-2 class**, not TAPR: MAX25 runs the very
+> same ESC-based sequence on it (`pktnc2-boot-wait.sh` →
+> `tnc2c-boot-wait.py`, `kiss_entry = auto`). `kiss on\r` is only for
+> real TAPR devices — a TheFirmware TNC fed with TAPR commands never
+> enters KISS, and its PTT never keys.
 
 **Caution — field vs. manual:** the TNC2C manual requires 7E1, in practice
 the Landolt TNC2C runs at **19200 8N1**. PRTERM makes the profile configurable
@@ -73,15 +79,29 @@ and warns when opening with a deviating line format.
 ### Sequence (composite recipe)
 
 1. Open the port, configure it, RTS/DTR high, **wait 2 s**.
-2. Listen passively for a banner for 1.5 s.
-3. Only in echo-only: recovery ladder
+2. Leave KISS (`C0 FF C0`) **only when KISS is believed held** — on
+   TheFirmware it is a firmware *reset*; wait the boot out (banner,
+   then a quiet line) before any command. A blind reset of a
+   terminal-mode device buys a boot race: MYCALL and entry vanish
+   into the boot, and the host believes "KISS held" while the PTT
+   stays deaf.
+3. Listen passively for a banner for 1.5 s.
+4. Only in echo-only: recovery ladder
    `C0 FF C0` → `11 18` + 300×`00` + `JHOST 0` → `ESC V` → `ESC QRES` →
    `ESC E0` → `ESC V` → second `ESC QRES` → `kiss off\r` + `INFO\r`.
-4. `1B 49 20 <CALL> 0D`  (MYCALL) — error: `?` in the first 32 bytes.
-5. `1B 40 4B`  (KISS on) — TAPR class: `kiss on\r`.
-6. Send KISS parameters (§4).
-7. Operation: `C0 00 <escaped payload> C0`.
-8. Shut down: `C0 FF C0` — **leave the port open** (holds DTR).
+5. `1B 49 20 <CALL> 0D`  (MYCALL) — **the PTT gate**: without an
+   accepted MYCALL the firmware never keys on KISS DATA (MAX25
+   kiss_bridge). `?` in the first 32 bytes = rejected → buffer flush,
+   one retry, then a loud warning.
+6. KISS entry: `1B 40 4B` (TAPR class: `kiss on\r`). `auto` repeats
+   the entry once when the firmware answers only with the text
+   "kiss on" without switching.
+7. **Verify the entry**: the class probe (ESC V / INFO) must stay
+   *silent* — a terminal answer means the entry did not take.
+   One retry, then fail loudly instead of pretending "held".
+8. Send KISS parameters (§4).
+9. Operation: `C0 00 <escaped payload> C0`.
+10. Shut down: `C0 FF C0` — **leave the port open** (holds DTR).
 
 ---
 
@@ -115,8 +135,13 @@ PERSIST = 63    (amateur radio)
 TXTAIL  = profile-dependent
 ```
 
-**FCS:** before sending, the AX.25 FCS is removed, **if** the CRC-16 is correct
-(reflected polynomial `0x8408`, init `0xFFFF`, final XOR `0xFFFF`).
+**FCS:** outgoing DATA frames go **without** FCS — the TNC computes
+and adds it on air (MAX25 `kiss_bridge.kiss_data_frame` strips a valid
+trailer the same way; TheFirmware also tolerates an appended trailer,
+the MAX25 bench scripts send one). **Incoming** frames arrive **with**
+the trailer: validate (reflected polynomial `0x8408`, init `0xFFFF`,
+final XOR `0xFFFF`, little-endian) and strip; a bad CRC means a damaged
+frame on air and is dropped.
 
 ### TNC2 host mode alternative (without KISS)
 

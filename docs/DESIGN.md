@@ -53,11 +53,11 @@ Portability rules:
 
 ## 3. Supported hardware
 
-| Driver   | Rig                                  | Protocol               | Status         |
-| -------- | ------------------------------------ | ---------------------- | -------------- |
-| `sim`    | —                                    | Simulation             | active path    |
-| `tmodem` | T-Modem (half-TNC)                   | ESC host frames        | transitional   |
-| `tnc2`   | Landolt TNC2C, PK-TNC2 (TNC2 clones) | KISS + ESC host mode   | planned        |
+| Driver   | Rig                                  | Protocol               | Status    |
+| -------- | ------------------------------------ | ---------------------- | --------- |
+| `sim`    | —                                    | Simulation             | active path |
+| `tnc2`   | Landolt TNC2C, PK-TNC2 (TheFirmware TNC-2 class) | KISS + ESC host mode   | in use    |
+| `tmodem` | T-Modem (half-TNC)                   | ESC host frames        | planned   |
 
 **Not supported today:** Baycom and ARDOP. Baycom will be studied and built into
 PRTERM later; ARDOP comes later still, and only as an external plugin that talks
