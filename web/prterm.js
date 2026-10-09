@@ -203,6 +203,31 @@
     /* Echo the command locally. */
     mboxAppend([cmd], "ln ln-cmd");
 
+    /* Intercept /broadcast — PRTERM checks band-free time and
+     * transmits over RF via the real TNC, then we forward to
+     * MailboxD so telnet users also see the message. */
+    var bcastMatch = cmd.match(/^\/broadcast[\s]+(.+)$/i);
+    if (bcastMatch) {
+      var bmsg = bcastMatch[1];
+      post({ action: "mbox_broadcast", msg: bmsg }, function (j) {
+        if (!j) {
+          mboxAppend([L("request failed")], "ln ln-err");
+          return;
+        }
+        if (!j.ok) {
+          mboxAppend([j.error], "ln ln-err");
+          return;
+        }
+        mboxAppend([L("RF broadcast transmitted.")], "ln ln-sys");
+        /* Also forward to MailboxD so BBS telnet users see it. */
+        post({ action: "mbox_run", cmd: cmd }, function (j2) {
+          if (j2 && j2.ok && j2.lines && j2.lines.length)
+            mboxAppend(j2.lines, "ln ln-sys");
+        });
+      });
+      return;
+    }
+
     post({ action: "mbox_run", cmd: cmd }, function (j) {
       if (!j) {
         mboxAppend([L("request failed")], "ln ln-err");

@@ -1055,6 +1055,9 @@ void page_render(pr_buf *out, const pr_config *cfg, const pr_session *sess,
             "Half duplex — no reception while transmitting.",
             "connected",
             "disconnected",
+            "channel not clear — wait %ld s (need 150 s silence)",
+            "RF broadcast transmitted.",
+            "broadcast message is empty",
             NULL
         };
 
@@ -1146,6 +1149,16 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
         json_kv_int(b, "radio_baud", station->radio_baud);
     }
     json_kv_bool(b, "link_ok", a->st.link_ok);
+    json_kv_int(b, "last_rx_ts", (int)a->st.last_rx_ts);
+    json_kv_int(b, "last_tx_ts", (int)a->st.last_tx_ts);
+    /* Band-free seconds: silence since the last RX or TX on this device. */
+    {
+        long long now = pr_now_s();
+        long long last = a->st.last_rx_ts;
+        if (a->st.last_tx_ts > last) last = a->st.last_tx_ts;
+        long long free = (last > 0) ? (now - last) : 999;
+        json_kv_int(b, "band_free_s", (int)free);
+    }
     /* Reason why the rig did not come up - without it the problem
      * stays invisible: the page renders, but nothing works. */
     if (!rig_started && a->err[0] != '\0')
@@ -1505,6 +1518,66 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         }
         if (strcmp(action, "mbox_logout") == 0) {
             pr_mbox_logout(req, res);
+            app_stop(&a);
+            return 0;
+        }
+
+        /* ---- MailboxD /broadcast via RF --------------------------------
+         *
+         * The MailboxD bridge does NOT have direct access to the TNC or
+         * to the channel-silence timer.  When the browser sends
+         * action=mbox_broadcast&msg=… we check band-free time against
+         * this host's rig state and, if the channel has been silent for
+         * ≥ 150 s (2 min 30 s), transmit an AX.25 CQ broadcast via the
+         * real TNC.  The caller (JS) then forwards the same text to
+         * MailboxD's /broadcast so telnet users see it too.
+         */
+        if (strcmp(action, "mbox_broadcast") == 0) {
+            const char *msg = pr_req_param(req, "msg");
+            if (msg == NULL || msg[0] == '\0') {
+                json_err(res, pr_tr(cfg->language, "broadcast message is empty"));
+                app_stop(&a);
+                return 0;
+            }
+            if (!rig_started) {
+                json_err(res, a.err[0] ? a.err : pr_tr(cfg->language, "no rig connected"));
+                app_stop(&a);
+                return 0;
+            }
+            if (a.st.monitor) {
+                json_err(res, pr_tr(cfg->language, "monitor mode: transmitting is locked"));
+                app_stop(&a);
+                return 0;
+            }
+
+            /* Band-free check: the channel must have been silent for
+             * at least 150 seconds (2 min 30 s) before we transmit.
+             * last_rx_ts / last_tx_ts are 0 when no activity was
+             * recorded — treat that as "forever silent". */
+            long long now = pr_now_s();
+            long long last_activity = a.st.last_rx_ts;
+            if (a.st.last_tx_ts > last_activity)
+                last_activity = a.st.last_tx_ts;
+            long long silent = (last_activity > 0) ? (now - last_activity) : 999;
+
+            if (silent < 150) {
+                long remaining = 150 - (long)silent;
+                char msg_buf[256];
+                snprintf(msg_buf, sizeof msg_buf,
+                         pr_tr(cfg->language, "channel not clear — wait %ld s (need 150 s silence)"),
+                         remaining);
+                json_err(res, msg_buf);
+                app_stop(&a);
+                return 0;
+            }
+
+            /* Transmit CQ broadcast via the real TNC. */
+            char err[256];
+            if (app_tx(&a, "", msg, &sess, err, sizeof err) != 0) {
+                json_err(res, err);
+            } else {
+                json_ok(res);
+            }
             app_stop(&a);
             return 0;
         }
