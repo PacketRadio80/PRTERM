@@ -27,9 +27,9 @@
     cols: 0,
     rows: 0,
     timer: null,
-    pollMs: 1000,
     lastLog: "",
     busy: false,
+    pollFast: false,
     /* Command history — last 25 commands per terminal. */
     hist: { tx: [], mbox: [] },
     hidx: { tx: -1, mbox: -1 }  /* -1 = not browsing */
@@ -599,6 +599,7 @@
           /* Limit the stock   */
           while (S.msgs.length > 900) S.msgs.shift();
           renderLog(j.messages);
+          S.pollFast = true;          /* adaptive: speed up on new data */
         }
         if (j.error) flash(j.error, "warn");
       })
@@ -792,7 +793,18 @@
     measureGrid();
     switchView("terminal");
     refresh(true);
-    S.timer = setInterval(function () { refresh(false); }, S.pollMs);
+    /* Adaptive polling: 300 ms during active reception, 1000 ms when
+     * idle.  refresh() sets S.pollFast = true when new messages arrive;
+     * the timer resets to the fast interval immediately.  After one
+     * idle cycle it falls back to the slow interval. */
+    (function schedulePoll() {
+      var ms = S.pollFast ? 300 : 1000;
+      S.pollFast = false;
+      S.timer = setTimeout(function () {
+        refresh(false);
+        schedulePoll();
+      }, ms);
+    })();
   }
 
   if (document.readyState === "loading") {
