@@ -1,0 +1,111 @@
+; PRTERM - CB & Amateur Radio Terminal
+; Complete configuration reference (prterm.ini.full)
+;
+; Copy sections you need to prterm.ini.  Missing keys use compiled-in defaults.
+; Format: [section] headers, key = value, ; or # comments.
+
+; ─── [site] ─ Station identity and UI language ──────────────────────────
+[site]
+name            = PRTERM              ; Station name (header bar)
+subtitle        =                     ; Subtitle (empty = hidden)
+language        = en                  ; UI language: en|de|es|pt|fr
+
+; ─── [station] ─ Global station defaults (inherited by [station:NAME]) ──
+[station]
+callerid        = PRTERM-1            ; Callsign (6 chars + optional -N SSID)
+qth             =                     ; Location name (e.g. "MGH")
+locator         =                     ; Maidenhead (e.g. "JN49VL")
+
+; ─── [ui] ─ Web interface ──────────────────────────────────────────────
+[ui]
+font_file       =                     ; .otf/.ttf path (empty = system mono)
+font_size       = 14                  ; CSS pixels (6–96)
+line_height     = 1.2                 ; Line height multiplier
+density         = compact             ; compact | normal
+rows            = 0                   ; Terminal rows (0 = auto from window)
+columns         = 0                   ; Terminal columns (0 = auto)
+theme           = silver              ; silver | dark
+
+; ─── [radio] ─ TNC and rig defaults ────────────────────────────────────
+[radio]
+duplex          = half                ; full | half (RX during TX?)
+driver          = tnc2                ; Rig driver: sim | tnc2 | tmodem
+port            = /dev/ttyUSB0        ; Serial device to TNC
+baud            = 115200              ; Serial baud (300–4000000)
+radio_baud      = 1200                ; Channel baud: TNC2C=2400, PK-TNC2=1200
+modem           =                     ; Modem type (e.g. "tcm3105")
+line            = 8n1                 ; Serial line: 8n1|7e1|7o1|8e1|8o1
+kiss_init       = esc                 ; KISS entry: esc|auto|tapr
+freq_hz         = 27125000            ; Frequency in Hz
+mode            = am                  ; fm|am|ssb|lsb|usb|cw
+tx_power_mw     = 4000                ; TX power mW (0–12000)
+rx_poll_ms      = 250                 ; RX poll interval ms (50–10000)
+max_log         = 500                 ; Max log lines (20–20000)
+
+; ─── [admin] ─ Web administration ──────────────────────────────────────
+[admin]
+enabled         = true                ; Admin area enabled?
+user            = admin               ; Admin username
+pass_hash       =                     ; SHA256 hash (empty = built-in default)
+session_ttl_min = 480                 ; Session timeout minutes (1–10080)
+allow_guest_tx  = true                ; Guest users may transmit?
+
+; ─── [mailboxd] ─ MailboxD BBS integration ─────────────────────────────
+[mailboxd]
+enabled         = false               ; Show MailboxD tab?
+dir             = /var/mailboxd       ; MailboxD install directory
+
+; ─── [debug] ─ Logging ─────────────────────────────────────────────────
+[debug]
+level           = warn                ; off|error|warn|info|debug|trace
+
+; ─── [callsign] ─ Callsign validation rules ────────────────────────────
+[callsign]
+callid_max_len       = 6              ; Max base-call length (1–10)
+callerid_base_len    = 6              ; CallerID base length (1–10)
+callerid_max_total   = 8              ; CallerID total (incl. SSID)
+callerid_allow_ssid  = true           ; Allow "-N" suffix?
+callerid_ssid_digits = 1              ; SSID digits after '-' (0–2)
+
+; ─── [ban] ─ Banned callsigns ──────────────────────────────────────────
+[ban]
+; Key = pattern (* = any, ? = single char), value = reason.
+; DL9*            = spam
+; KB1ABC-3        = interference
+
+; ─── [paths] ─ Runtime directories ─────────────────────────────────────
+[paths]
+runtime_dir     = ./prterm.runtime    ; Session/state dir (relative to CGI)
+
+; ─── [station:NAME] ─ Per-station overrides ────────────────────────────
+; Each [station:NAME] = one TNC + rig + antenna. Missing keys inherit
+; from [radio] and [station].
+; kiss_init: esc=TNC2C(TheFirmware)  auto=PK-TNC2(TheFirmware)  tapr=TAPR
+; mode: per-station FM/AM/SSB switch; absent = inherit [radio] mode
+; freq_hz: 0 = inherit [radio] freq_hz
+; antenne: free-form label
+; enabled: true|false (default true)
+;
+; [station:tnc2c]
+; driver      = tnc2
+; port        = /dev/ttyUSB0
+; baud        = 19200
+; radio_baud  = 2400
+; modem       = tcm3105
+; line        = 8n1
+; kiss_init   = esc
+; mode        = fm
+; callerid    = MYCALL
+; antenne     = DiPol
+; enabled     = true
+;
+; [station:pktn2c]
+; driver      = tnc2
+; port        = /dev/ttyUSB1
+; baud        = 9600
+; radio_baud  = 1200
+; kiss_init   = auto
+; mode        = fm
+; callerid    = MYCALL
+; antenne     = DiPol
+; enabled     = true
