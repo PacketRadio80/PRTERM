@@ -714,7 +714,12 @@ void pr_mbox_run(pr_request *req, pr_response *res, pr_config *cfg)
         return;
     }
 
-    /* Silent re-login if cookies present. */
+    /* Silent re-login if cookies present. The /login reply MUST be
+     * fully drained before sending the next RUN — otherwise the
+     * commands race on the same socket and the second one is
+     * answered as a guest. pr_mailboxdsock_run already loops
+     * until "END ok"/"END err", so once it returns the session
+     * is logged in and ready. */
     char mbox_u_enc[256];
     char mbox_p_enc[256];
     if (pr_req_cookie(req, "MBOX_U", mbox_u_enc, sizeof mbox_u_enc) &&
@@ -727,7 +732,8 @@ void pr_mbox_run(pr_request *req, pr_response *res, pr_config *cfg)
         char logincmd[256];
         snprintf(logincmd, sizeof logincmd, "/login %s %s", user, pass);
         char lout[2048];
-        pr_mailboxdsock_run(&m, logincmd, lout, sizeof lout, NULL, err, sizeof err);
+        size_t llines = 0;
+        pr_mailboxdsock_run(&m, logincmd, lout, sizeof lout, &llines, err, sizeof err);
     }
 
     char out[4096];
