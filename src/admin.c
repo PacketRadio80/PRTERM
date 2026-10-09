@@ -737,8 +737,29 @@ void pr_mbox_run(pr_request *req, pr_response *res, pr_config *cfg)
         json_lines_array(&res->body, out);
         pr_buf_add(&res->body, "]}");
     } else {
+        /* Use OUT lines as error message if MailboxD sent them
+         * (cmd_ handlers like /users write "Unknown command" etc.
+         * before the END err).  Fall back to a translated raw code. */
+        const char *msg = out;
+        if (out[0] == '\0') {
+            /* Translate raw dispatch-failed codes to readable text. */
+            if (strstr(err, "dispatch-failed--7") != NULL)
+                msg = "Insufficient privileges.";
+            else if (strstr(err, "dispatch-failed--3") != NULL)
+                msg = "Command not found.";
+            else if (strstr(err, "dispatch-failed--6") != NULL)
+                msg = "MailboxD busy, try again.";
+            else if (strstr(err, "dispatch-failed") != NULL)
+                msg = "Command failed.";
+            else if (strstr(err, "not-a-mailboxd-command") != NULL)
+                msg = "Only /commands are allowed.";
+            else if (strstr(err, "empty-command") != NULL)
+                msg = "Enter a command.";
+            else
+                msg = err;
+        }
         pr_buf_add(&res->body, ",\"error\":\"");
-        pr_json_escape(&res->body, err);
+        pr_json_escape(&res->body, msg);
         pr_buf_add(&res->body, "\"}");
     }
 }

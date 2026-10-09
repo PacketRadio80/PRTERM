@@ -267,7 +267,15 @@ int pr_mailboxdsock_run(pr_mailboxdsock *c, const char *cmdline,
             break;
         }
         if (strncmp(line, "END err", 7) == 0) {
-            return set_err(err, errlen, "mailboxd: %s", line + 8);
+            /* MailboxD may have sent OUT lines before the END err
+             * (e.g. the actual error text from cmd_ handlers like
+             * "Unknown command" or "Access denied").  Keep them in
+             * the output buffer so the caller can display them,
+             * then set the err string from the END line. */
+            if (out_lines != NULL) {
+                *out_lines = n_lines;
+            }
+            return set_err(err, errlen, "%s", line + 8);
         }
         if (strncmp(line, "OUT ", 4) != 0) {
             return set_err(err, errlen, "unexpected line: %.64s", line);
