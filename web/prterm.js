@@ -29,7 +29,10 @@
     timer: null,
     pollMs: 1000,
     lastLog: "",
-    busy: false
+    busy: false,
+    /* Command history — last 25 commands per terminal. */
+    hist: { tx: [], mbox: [] },
+    hidx: { tx: -1, mbox: -1 }  /* -1 = not browsing */
   };
 
   function $(id) { return document.getElementById(id); }
@@ -182,11 +185,69 @@
     else mboxShowUnlinked();
   }
 
+  /* ----------------------------------------------------------------------
+     Command history — reusable for both terminals.
+     key: "tx" for the main terminal, "mbox" for the mailbox terminal.
+     ---------------------------------------------------------------------- */
+  var HIST_MAX = 25;
+
+  function histPush(key, cmd) {
+    if (!cmd || !cmd.trim()) return;
+    var h = S.hist[key];
+    /* Don't duplicate the last entry. */
+    if (h.length > 0 && h[h.length - 1] === cmd) return;
+    h.push(cmd);
+    if (h.length > HIST_MAX) h.shift();
+    S.hidx[key] = -1;
+  }
+
+  /* Returns the previous or next entry, or "" at the boundaries.
+   * dir: -1 = ArrowUp (older), +1 = ArrowDown (newer). */
+  function histNav(key, input, dir) {
+    var h = S.hist[key];
+    if (h.length === 0) return;
+    var idx = S.hidx[key];
+
+    if (dir < 0) {
+      /* ArrowUp: go to older entry. */
+      if (idx < 0) idx = h.length;          /* start from "after last" */
+      idx--;
+      if (idx < 0) idx = 0;                 /* clamp at oldest */
+    } else {
+      /* ArrowDown: go to newer entry. */
+      if (idx < 0) return;                   /* nothing to go forward to */
+      idx++;
+      if (idx >= h.length) {                 /* past the end → clear */
+        S.hidx[key] = -1;
+        input.value = "";
+        return;
+      }
+    }
+    S.hidx[key] = idx;
+    input.value = h[idx];
+  }
+
+  /* Attach history key handling to an input element. */
+  function histBind(inputId, key) {
+    var el = $(inputId);
+    if (!el) return;
+    el.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        histNav(key, el, -1);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        histNav(key, el, +1);
+      }
+    });
+  }
+
   function sendMailboxCmd() {
     var i = $("mbox-cmd");
     if (!i) return;
     var cmd = i.value.trim();
     if (!cmd) return;
+    histPush("mbox", cmd);
     i.value = "";
 
     /* Intercept /logout, /quit, /bye locally — clear cookies and
@@ -447,6 +508,7 @@
     if (!input) return;
     var text = input.value;
     if (!text.trim()) return;
+    histPush("tx", text);
 
     /* Station to call - stays empty for broadcast (CQ).    */
     var call = $("callto");
@@ -600,6 +662,10 @@
         sendMailboxCmd();
       });
     }
+
+    /* Command history — ArrowUp/ArrowDown in both terminals. */
+    histBind("txtext", "tx");
+    histBind("mbox-cmd", "mbox");
 
     var mboxLogin = $("mbox-loginform");
     if (mboxLogin) {
