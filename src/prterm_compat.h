@@ -33,4 +33,15 @@
 #  endif
 #endif
 
+/* MSG_NOSIGNAL: Linux defines this in <sys/socket.h> (as an enum
+ * constant wrapped in a self-referencing macro).  FreeBSD/OpenBSD/
+ * MacOS do not have it — SO_NOSIGPIPE is the equivalent, set per
+ * socket.  Both PRTERM and the MailboxD daemon already install
+ * signal(SIGPIPE, SIG_IGN) globally, so on BSD the missing flag is
+ * harmless.  Define it as 0 only on non-Linux so we never collide
+ * with the system header's enum definition. */
+#if !defined(__linux__) && !defined(MSG_NOSIGNAL)
+#define MSG_NOSIGNAL 0
+#endif
+
 #endif /* PRTERM_COMPAT_H */

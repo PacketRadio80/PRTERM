@@ -77,6 +77,7 @@ void pr_response_clear_cookie(pr_response *r, const char *name);
 void pr_response_html(pr_response *r, int status);
 void pr_response_json(pr_response *r, int status);
 void pr_response_text(pr_response *r, int status);
+void pr_response_redirect(pr_response *r, int status, const char *location);
 void pr_response_binary(pr_response *r, int status, const char *mime);
 
 void pr_response_emit(const pr_response *r);

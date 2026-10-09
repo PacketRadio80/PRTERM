@@ -67,7 +67,7 @@ static int connect_unix(const char *path, char *err, size_t errlen)
      * and prevents the CGI from ever hanging for the full default 75 s
      * SO_RCVTIMEO. 2 s for the rare slow first connect is fine too.
      */
-    struct timeval to = { .tv_sec = 2, .tv_usec = 0 };
+    struct timeval to = { .tv_sec = 10, .tv_usec = 0 };
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof to);
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof to);
     return fd;

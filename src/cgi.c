@@ -277,6 +277,16 @@ void pr_response_text(pr_response *r, int status)
     pr_strlcpy(r->content_type, "text/plain; charset=utf-8", sizeof r->content_type);
 }
 
+void pr_response_redirect(pr_response *r, int status, const char *location)
+{
+    r->status = status;
+    pr_strlcpy(r->content_type, "text/plain; charset=utf-8", sizeof r->content_type);
+    char hdr[1024];
+    snprintf(hdr, sizeof hdr, "Location: %s",
+             location != NULL ? location : "/");
+    pr_response_header(r, "%s", hdr);
+}
+
 void pr_response_binary(pr_response *r, int status, const char *mime)
 {
     r->status = status;

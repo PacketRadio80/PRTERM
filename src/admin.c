@@ -651,10 +651,16 @@ void pr_mbox_login(pr_request *req, pr_response *res, pr_config *cfg)
     }
 
     /* Check if login actually succeeded.  MailboxD's /login command
-     * outputs "Hello, <user>." on success, "Invalid password." or
+     * outputs a greeting on success (e.g. "Hello, <user>." or
+     * "Good time, <user>."), "Invalid password." or
      * "Unknown user." on failure.  The RUN itself returns rc=0 in
      * both cases (the command was dispatched). */
-    if (lines == 0 || strncmp(out, "Hello", 5) != 0) {
+    if (lines == 0 ||
+        strstr(out, "Invalid password") != NULL ||
+        strstr(out, "Unknown user") != NULL ||
+        strstr(out, "already logged in") != NULL ||
+        strstr(out, "activation") != NULL ||
+        strstr(out, "no password") != NULL) {
         /* Extract first line as error message. */
         char firstline[256];
         const char *nl = strchr(out, '\n');
