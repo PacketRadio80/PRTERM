@@ -241,18 +241,21 @@ static void tx_hold_airtime(const pr_config *cfg, size_t textlen)
     (void)nanosleep(&ts, NULL);
 }
 
-static int app_tx(app *a, const char *to, const char *text,
+static int app_tx(app *a, const char *from, const char *to, const char *text,
                   const pr_session *sess, char *err, size_t errlen)
 {
     if (app_tx_gate(a, sess, err, errlen) != 0)
         return -1;
 
+    if (from == NULL || from[0] == '\0')
+        from = a->cfg->callerid;
+
     int lock = pr_arbiter_acquire(a->cfg->runtime_dir, a->st.freq_hz,
-                                  a->cfg->callerid, 3000, err, errlen);
+                                  from, 3000, err, errlen);
     if (lock < 0)
         return -1;
 
-    int rc = a->rig.vtbl->send(&a->rig, a->cfg->callerid, to, text,
+    int rc = a->rig.vtbl->send(&a->rig, from, to, text,
                                err, errlen);
     if (rc == 0)
         tx_hold_airtime(a->cfg, text != NULL ? strlen(text) : 0);
@@ -1351,7 +1354,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
             if (!rig_started) {
                 json_err(res, a.err);
-            } else if (app_tx(&a, to, text, &sess, err, sizeof err) != 0) {
+            } else if (app_tx(&a, cfg->callerid, to, text, &sess, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
                 json_ok(res);
@@ -1578,7 +1581,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
             /* Transmit CQ broadcast via the real TNC. */
             char err[256];
-            if (app_tx(&a, "", msg, &sess, err, sizeof err) != 0) {
+            if (app_tx(&a, cfg->callerid, "", msg, &sess, err, sizeof err) != 0) {
                 json_err(res, err);
             } else {
                 json_ok(res);
@@ -1589,7 +1592,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         /* ---- MailboxD CQ beacon cycle ------------------------------------
          *
-         * action=mbox_cqbeacon&callerid=MGHBX1
+         * action=mbox_cqbeacon&callerid=MGHBX1&msg=MGHBX1+%3D+online
          *
          * Cycles through all configured stations, checks band-free
          * (≥150 s silence) on each, and sends an AX.25 CQ frame from
@@ -1597,8 +1600,14 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
          * MailboxD's beacon daemon thread. */
         if (strcmp(action, "mbox_cqbeacon") == 0) {
             const char *cid = pr_req_param(req, "callerid");
+            const char *msg = pr_req_param(req, "msg");
             if (cid == NULL || cid[0] == '\0') {
                 json_err(res, pr_tr(cfg->language, "callerid is required"));
+                app_stop(&a);
+                return 0;
+            }
+            if (msg == NULL || msg[0] == '\0') {
+                json_err(res, pr_tr(cfg->language, "broadcast message is empty"));
                 app_stop(&a);
                 return 0;
             }
@@ -1616,22 +1625,17 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 const pr_station *sta = &cfg->stations[si];
                 if (!sta->enabled) continue;
 
-                /* We need the rig state for THIS station to check
-                 * band-free.  app_start() already loaded the first
-                 * station's rig — for the others we'd need to
-                 * switch.  For simplicity, use the global rig state
-                 * from `a.st` which reflects the currently active
-                 * station.  Devices cycle naturally because prterm-tncd
-                 * drives them round-robin. */
                 long long last = a.st.last_rx_ts;
                 if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
                 long long silent = (last > 0) ? (now - last) : 999;
 
                 if (silent < 150) continue;
 
-                /* Transmit CQ beacon on this device. */
+                /* Transmit CQ beacon.  'cid' is the MailboxD
+                 * callerid (from mailboxd.ini), NOT PRTERM's own
+                 * callerid — MGHBX1 appears as the AX.25 source. */
                 char err[256];
-                if (app_tx(&a, "CQ", cid, &sess, err, sizeof err) == 0) {
+                if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
                     transmitted = true;
                     pr_strlcpy(used_device, sta->name, sizeof used_device);
                 }
