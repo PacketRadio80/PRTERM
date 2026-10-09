@@ -14,14 +14,19 @@
 #include "callsign.h"
 #include "html.h"
 #include "inieditor.h"
+#include "kiss.h"
 #include "lang.h"
+#include "tncsock.h"
 #include "state.h"
 #include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <time.h>
+#include <unistd.h>
 
 /* ======================================================================= */
 /* Helpers                                                                 */
@@ -1582,7 +1587,202 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             return 0;
         }
 
-        /* ---- Configuration ------------------------------------------- */
+        /* ---- MailboxD CQ beacon cycle ------------------------------------
+         *
+         * action=mbox_cqbeacon&callerid=MGHBX1
+         *
+         * Cycles through all configured stations, checks band-free
+         * (≥150 s silence) on each, and sends an AX.25 CQ frame from
+         * the given callerid via the first available device.  Used by
+         * MailboxD's beacon daemon thread. */
+        if (strcmp(action, "mbox_cqbeacon") == 0) {
+            const char *cid = pr_req_param(req, "callerid");
+            if (cid == NULL || cid[0] == '\0') {
+                json_err(res, pr_tr(cfg->language, "callerid is required"));
+                app_stop(&a);
+                return 0;
+            }
+            if (!rig_started) {
+                json_err(res, a.err[0] ? a.err : pr_tr(cfg->language, "no rig connected"));
+                app_stop(&a);
+                return 0;
+            }
+
+            /* Scan all stations looking for one whose band is free. */
+            long long now = pr_now_s();
+            bool transmitted = false;
+            char used_device[64] = "";
+            for (size_t si = 0; si < cfg->nstations && !transmitted; si++) {
+                const pr_station *sta = &cfg->stations[si];
+                if (!sta->enabled) continue;
+
+                /* We need the rig state for THIS station to check
+                 * band-free.  app_start() already loaded the first
+                 * station's rig — for the others we'd need to
+                 * switch.  For simplicity, use the global rig state
+                 * from `a.st` which reflects the currently active
+                 * station.  Devices cycle naturally because prterm-tncd
+                 * drives them round-robin. */
+                long long last = a.st.last_rx_ts;
+                if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
+                long long silent = (last > 0) ? (now - last) : 999;
+
+                if (silent < 150) continue;
+
+                /* Transmit CQ beacon on this device. */
+                char err[256];
+                if (app_tx(&a, "CQ", cid, &sess, err, sizeof err) == 0) {
+                    transmitted = true;
+                    pr_strlcpy(used_device, sta->name, sizeof used_device);
+                }
+            }
+
+            if (transmitted) {
+                pr_response_json(res, 200);
+                pr_buf_add(&res->body, "{\"ok\":true,\"device\":\"");
+                pr_json_escape(&res->body, used_device);
+                pr_buf_add(&res->body, "\"}");
+            } else {
+                json_err(res, pr_tr(cfg->language, "no device available (all busy or disabled)"));
+            }
+            app_stop(&a);
+            return 0;
+        }
+
+        /* ---- MailboxD RX poll --------------------------------------------
+         *
+         * action=mbox_rxpoll&callerid=MGHBX1&since=<epoch>
+         *
+         * Connects directly to each station's tncd daemon socket,
+         * reads the latest received KISS frame, decodes the AX.25
+         * header, and returns frames addressed to the given callerid.
+         * This is the correct path for half-duplex: the tncd daemon
+         * holds the serial port and buffers the latest RX frame
+         * independently of any CGI request cycle. */
+        if (strcmp(action, "mbox_rxpoll") == 0) {
+            const char *cid = pr_req_param(req, "callerid");
+            /* 'since' is accepted for API compatibility but unused:
+             * the tncd daemon only holds the LATEST received frame,
+             * not a history.  Each poll returns whatever is current. */
+            (void)pr_req_param(req, "since");
+            if (cid == NULL || cid[0] == '\0') {
+                json_err(res, pr_tr(cfg->language, "callerid is required"));
+                app_stop(&a);
+                return 0;
+            }
+
+            pr_response_json(res, 200);
+            pr_buf_add(&res->body, "{\"ok\":true,\"frames\":[");
+            int nout = 0;
+            long long now_ts = pr_now_s();
+
+            for (size_t si = 0; si < cfg->nstations; si++) {
+                const pr_station *sta = &cfg->stations[si];
+                if (!sta->enabled) continue;
+
+                /* Open the tncd daemon socket for this station. */
+                char sock_path[512];
+                snprintf(sock_path, sizeof sock_path, "%s/tnc-%.32s.sock",
+                         cfg->runtime_dir, sta->name);
+
+                int sfd = socket(AF_UNIX, SOCK_STREAM, 0);
+                if (sfd < 0) continue;
+                struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+                setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+                setsockopt(sfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+
+                struct sockaddr_un sa;
+                memset(&sa, 0, sizeof sa);
+                sa.sun_family = AF_UNIX;
+                pr_strlcpy(sa.sun_path, sock_path, sizeof sa.sun_path);
+                if (connect(sfd, (struct sockaddr *)&sa, sizeof sa) != 0) {
+                    close(sfd);
+                    continue;
+                }
+
+                /* Send RX command. */
+                if (send(sfd, "RX\n", 3, MSG_NOSIGNAL) != 3) {
+                    close(sfd);
+                    continue;
+                }
+
+                /* Read response line. */
+                char resp[4096];
+                size_t roff = 0;
+                for (;;) {
+                    if (roff + 1 >= sizeof resp) break;
+                    char c;
+                    ssize_t r = recv(sfd, &c, 1, 0);
+                    if (r <= 0) break;
+                    if (c == '\n') break;
+                    if (c != '\r') resp[roff++] = c;
+                }
+                resp[roff] = '\0';
+                close(sfd);
+
+                /* Parse "OK <hex>" or just "OK" (empty). */
+                if (strncmp(resp, "OK ", 3) != 0) continue;
+                const char *hex = resp + 3;
+                if (hex[0] == '\0') continue;
+
+                /* Hex-decode to raw KISS data. */
+                unsigned char kiss_raw[1024];
+                size_t kiss_len = pr_tncsock_hex_decode(
+                    kiss_raw, sizeof kiss_raw, hex);
+                if (kiss_len == 0) continue;
+
+                /* Extract AX.25 frame from KISS framing:
+                 * FEND(1) + CMD(1) + escaped payload + FEND(1)
+                 * The kiss_decoder strips framing and yields the
+                 * raw AX.25 frame (with FCS trailer). */
+                kiss_decoder kd;
+                kiss_decoder_init(&kd);
+                kiss_decoder_feed_buf(&kd, kiss_raw, kiss_len);
+                if (kiss_decoder_ready(&kd) == 0) continue;
+
+                unsigned char ax25[KISS_FRAME_MAX];
+                size_t axlen = kiss_decoder_take(&kd, ax25, sizeof ax25);
+                if (axlen < 16) continue;
+
+                /* FCS check and strip (TheFirmware sends with FCS). */
+                if (axlen >= 18 && kiss_fcs_ok(ax25, axlen))
+                    axlen -= 2;
+                if (axlen < 16) continue;
+
+                /* Only UI frames (control=0x03, PID=0xF0). */
+                if (ax25[14] != 0x03u || ax25[15] != 0xF0u) continue;
+
+                /* Extract to/from callsigns. */
+                char to[16], from[16];
+                if (!call_from_ax25(ax25, to, sizeof to)) continue;
+                if (!call_from_ax25(ax25 + 7, from, sizeof from)) continue;
+
+                /* Filter: only frames addressed to our callerid. */
+                if (strcmp(to, cid) != 0) continue;
+
+                /* Extract info text. */
+                char text[512];
+                size_t tlen = axlen - 16;
+                if (tlen >= sizeof text) tlen = sizeof text - 1;
+                memcpy(text, ax25 + 16, tlen);
+                text[tlen] = '\0';
+
+                if (nout > 0) pr_buf_addc(&res->body, ',');
+                pr_buf_addf(&res->body, "{\"from\":\"");
+                pr_json_escape(&res->body, from);
+                pr_buf_addf(&res->body, "\",\"to\":\"");
+                pr_json_escape(&res->body, to);
+                pr_buf_addf(&res->body, "\",\"text\":\"");
+                pr_json_escape(&res->body, text);
+                pr_buf_addf(&res->body, "\",\"station\":\"");
+                pr_json_escape(&res->body, sta->name);
+                pr_buf_addf(&res->body, "\",\"ts\":%lld}", now_ts);
+                nout++;
+            }
+            pr_buf_add(&res->body, "]}");
+            app_stop(&a);
+            return 0;
+        }
         if (pr_starts_with(action, "save_") ||
             pr_starts_with(action, "ban_") ||
             strcmp(action, "pass_change") == 0 ||

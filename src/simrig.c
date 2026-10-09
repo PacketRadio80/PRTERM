@@ -95,10 +95,10 @@ static void sim_format(char *dst, size_t dstlen, const char *tmpl, const char *w
     dst[w] = '\0';
 }
 
-static void sim_push_rx(sim_impl *s, const char *from, const char *text, int db)
+static void sim_push_rx(sim_impl *s, const char *from, const char *to,
+                       const char *text, int db)
 {
     if (s->npending >= SIM_MAX_PENDING) {
-        /* discard oldest     */
         memmove(&s->pending[0], &s->pending[1],
                 (SIM_MAX_PENDING - 1) * sizeof s->pending[0]);
         s->npending = SIM_MAX_PENDING - 1;
@@ -108,6 +108,8 @@ static void sim_push_rx(sim_impl *s, const char *from, const char *text, int db)
     memset(m, 0, sizeof *m);
     m->kind = PR_MSG_RX;
     pr_strlcpy(m->from, from, sizeof m->from);
+    if (to && to[0])
+        pr_strlcpy(m->to, to, sizeof m->to);
     pr_strlcpy(m->text, text, sizeof m->text);
     m->db = db;
     m->ts = pr_now_s();
@@ -230,7 +232,7 @@ static int sim_refresh(pr_rig *r, char *err, size_t errlen)
         const char *from = sim_stations[sim_rand(s) % SIM_STATIONS];
         char text[PR_MSG_TEXT];
         sim_format(text, sizeof text, sim_texts[sim_rand(s) % SIM_TEXTS], from);
-        sim_push_rx(s, from, text, s->st.rx_db);
+        sim_push_rx(s, from, r->cfg->callerid, text, s->st.rx_db);
         s->st.rx_count++;
     }
 
@@ -370,7 +372,7 @@ static int sim_send(pr_rig *r, const char *from, const char *to,
     if (s->st.duplex == PR_DUPLEX_FULL && !s->st.rx_muted) {
         char echo[PR_MSG_TEXT];
         snprintf(echo, sizeof echo, "Roger %s, kopiert.", from);
-        sim_push_rx(s, sim_stations[sim_rand(s) % SIM_STATIONS], echo, s->st.rx_db);
+        sim_push_rx(s, sim_stations[sim_rand(s) % SIM_STATIONS], r->cfg->callerid, echo, s->st.rx_db);
     }
     return 0;
 }
