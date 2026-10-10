@@ -1,0 +1,76 @@
+#!/bin/sh
+#
+# PROVIDE: prterm_tncd
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# /etc/rc.conf:
+#   prterm_tncd_enable="YES"
+#
+# Holds serial ports open and keeps TNCs in KISS mode.
+# One process per /dev/tty* — never start a second instance.
+
+. /etc/rc.subr
+
+name="prterm_tncd"
+rcvar="${name}_enable"
+
+load_rc_config $name
+
+: ${prterm_tncd_enable:="NO"}
+
+pidfile="/var/prterm/prterm.runtime/prterm_tncd.pid"
+
+start_cmd="prterm_tncd_start"
+stop_cmd="prterm_tncd_stop"
+status_cmd="prterm_tncd_status"
+
+prterm_tncd_start()
+{
+    if [ -f "${pidfile}" ] && kill -0 $(cat "${pidfile}") 2>/dev/null; then
+        echo "${name} already running? (pid=$(cat ${pidfile}))."
+        return 1
+    fi
+
+    if [ ! -x /var/prterm/prterm-tncd ]; then
+        echo "/var/prterm/prterm-tncd not found or not executable"
+        return 1
+    fi
+
+    # Ensure runtime dir + clean stale sockets
+    mkdir -p /var/prterm/prterm.runtime
+    chown lighttpd:lighttpd /var/prterm/prterm.runtime
+    rm -f /var/prterm/prterm.runtime/tnc-*.sock
+    rm -f /var/prterm/prterm.runtime/lock
+    rm -f /var/prterm/prterm.runtime/tx-*.lock
+
+    # Daemonize: fork into background, write PID, return immediately
+    cd /var/prterm
+    /usr/sbin/daemon -p "${pidfile}" -u lighttpd \
+        /var/prterm/prterm-tncd /var/prterm/prterm.ini
+
+    echo "Starting ${name}."
+}
+
+prterm_tncd_stop()
+{
+    if [ ! -f "${pidfile}" ]; then
+        echo "${name} not running?"
+        return 1
+    fi
+    kill $(cat "${pidfile}") 2>/dev/null
+    rm -f "${pidfile}"
+    echo "Stopping ${name}."
+}
+
+prterm_tncd_status()
+{
+    if [ -f "${pidfile}" ] && kill -0 $(cat "${pidfile}") 2>/dev/null; then
+        echo "${name} is running as pid $(cat ${pidfile})."
+    else
+        echo "${name} is not running."
+        rm -f "${pidfile}" 2>/dev/null
+    fi
+}
+
+run_rc_command "$1"
