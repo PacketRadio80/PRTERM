@@ -45,7 +45,9 @@ static const char *T(const pr_config *cfg, const char *english)
 static void json_err(pr_response *res, const char *msg)
 {
     pr_response_json(res, 400);
-    pr_buf_addf(&res->body, "{\"ok\":false,\"error\":\"%s\"}", msg);
+    pr_buf_add(&res->body, "{\"ok\":false,\"error\":\"");
+    pr_json_escape(&res->body, msg);
+    pr_buf_add(&res->body, "\"}");
 }
 
 static void json_ok(pr_response *res)
@@ -71,17 +73,24 @@ static int app_start(app *a, pr_config *cfg)
     memset(a, 0, sizeof *a);
     a->cfg = cfg;
     char err[256];
-    pr_runtime_init(cfg, err, sizeof err);
-
-    if (pr_rig_open(&a->rig, cfg, a->err, sizeof a->err) != 0) {
+    if (pr_runtime_init(cfg, err, sizeof err) != 0) {
         a->rig_ok = false;
         return -1;
     }
+
+    if (pr_rig_open(&a->rig, cfg, a->err, sizeof a->err) != 0) {
+        a->rig_ok = false;
+        pr_state_load(cfg, &a->st, a->err, sizeof a->err);
+        return -1;
+    }
     a->rig_ok = true;
-    a->rig.vtbl->refresh(&a->rig, a->err, sizeof a->err);
-    size_t ndrain = 0;
-    pr_msg tmp[64];
-    a->rig.vtbl->drain(&a->rig, tmp, 64, &ndrain);
+    if (a->rig.vtbl->refresh)
+        a->rig.vtbl->refresh(&a->rig, a->err, sizeof a->err);
+    if (a->rig.vtbl->drain) {
+        size_t ndrain = 0;
+        pr_msg tmp[64];
+        a->rig.vtbl->drain(&a->rig, tmp, 64, &ndrain);
+    }
     a->rig.vtbl->get_state(&a->rig, &a->st);
     return 0;
 }
@@ -89,6 +98,7 @@ static int app_start(app *a, pr_config *cfg)
 static void app_stop(app *a)
 {
     if (a->rig_ok) pr_rig_close(&a->rig);
+    a->rig_ok = false;
 }
 
 static int app_tx_gate(app *a, const pr_session *sess,
@@ -120,10 +130,11 @@ static int app_tx_gate(app *a, const pr_session *sess,
 
 static void app_tx_hold_airtime(const pr_config *cfg, size_t textlen)
 {
-    long baud = cfg->baud > 0 ? cfg->baud : 2400;
-    size_t frame = 16 + textlen + 2;
+    long baud = cfg->radio_baud > 0 ? cfg->radio_baud : 1200;
+    size_t frame = 18 + textlen;
     double sec = (double)frame * 8.0 / (double)baud;
-    if (sec < 0.05) sec = 0.05;
+    if (sec < 1.5) sec = 1.5;
+    if (sec > 30.0) sec = 30.0;
     struct timespec ts;
     ts.tv_sec = (time_t)sec;
     ts.tv_nsec = (long)((sec - ts.tv_sec) * 1e9);
@@ -886,7 +897,9 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 snprintf(title, sizeof title, "%s — %s", cfg->site_name, T(cfg, "Login failed"));
                 alter_doc_open(&res->body, cfg, NULL, title);
                 render_topbar(&res->body, cfg, &a.st);
-                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s</div>\n", err);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">");
+                pr_html_escape(&res->body, err);
+                pr_buf_add(&res->body, "</div>\n");
                 render_admin(&res->body, cfg, &sess, &a.st);
                 alter_doc_close(&res->body);
             } else {
@@ -937,8 +950,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
                 alter_doc_open(&res->body, cfg, &sess, title);
                 render_topbar(&res->body, cfg, &a.st);
-                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: %s</div>\n",
-                            T(cfg, "MailboxD is not connected"), err);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: ",
+                            T(cfg, "MailboxD is not connected"));
+                pr_html_escape(&res->body, err);
+                pr_buf_add(&res->body, "</div>\n");
                 render_mailbox(&res->body, cfg);
                 alter_doc_close(&res->body);
                 app_stop(&a);
@@ -967,8 +982,9 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
                 alter_doc_open(&res->body, cfg, &sess, title);
                 render_topbar(&res->body, cfg, &a.st);
-                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s</div>\n",
-                            out[0] != '\0' ? out : err);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">");
+                pr_html_escape(&res->body, out[0] != '\0' ? out : err);
+                pr_buf_add(&res->body, "</div>\n");
                 render_mailbox(&res->body, cfg);
                 alter_doc_close(&res->body);
             }
@@ -995,8 +1011,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
                 alter_doc_open(&res->body, cfg, &sess, title);
                 render_topbar(&res->body, cfg, &a.st);
-                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: %s</div>\n",
-                            T(cfg, "MailboxD is not connected"), err);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: ",
+                            T(cfg, "MailboxD is not connected"));
+                pr_html_escape(&res->body, err);
+                pr_buf_add(&res->body, "</div>\n");
                 render_mailbox(&res->body, cfg);
                 alter_doc_close(&res->body);
                 app_stop(&a);
@@ -1060,7 +1078,9 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 "</script>\n");
             /* Also show as pre for no-JS fallback */
             if (out[0] != '\0') {
-                pr_buf_addf(&res->body, "<pre class=\"term\" style=\"max-height:60vh;overflow-y:auto\">\n%s</pre>\n", out);
+                pr_buf_addf(&res->body, "<pre class=\"term\" style=\"max-height:60vh;overflow-y:auto\">\n");
+                pr_html_escape(&res->body, out);
+                pr_buf_add(&res->body, "</pre>\n");
             }
             alter_doc_close(&res->body);
             app_stop(&a);
@@ -1281,9 +1301,14 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         for (size_t i = 0; i < nlog; i++) {
             const pr_msg *m = &log[i];
             if (i > 0) pr_buf_add(&res->body, ",");
-            pr_buf_addf(&res->body,
-                "{\"kind\":\"%c\",\"ts\":%lld,\"from\":\"%s\",\"to\":\"%s\",\"text\":\"%s\"}",
-                m->kind, (long long)m->ts, m->from, m->to, m->text);
+            pr_buf_addf(&res->body, "{\"kind\":\"%c\",\"ts\":%lld,\"from\":\"",
+                m->kind, (long long)m->ts);
+            pr_json_escape(&res->body, m->from);
+            pr_buf_add(&res->body, "\",\"to\":\"");
+            pr_json_escape(&res->body, m->to);
+            pr_buf_add(&res->body, "\",\"text\":\"");
+            pr_json_escape(&res->body, m->text);
+            pr_buf_add(&res->body, "\"}");
         }
         pr_buf_add(&res->body, "]}");
         app_stop(&a);

@@ -572,7 +572,7 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
 {
     pr_buf_add(out, "<section class=\"view\" data-view=\"admin\">\n");
 
-    if (!sess->valid) {
+    if (sess == NULL || !sess->valid) {
         pr_buf_addf(out,
             "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
             "<p>%s "
@@ -1804,9 +1804,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
     /* ---- State as JSON    -------------------------------------------- */
     if (action != NULL && strcmp(action, "state") == 0) {
-        size_t want = (size_t)atoi(pr_req_get(req, "rows") != NULL
-                                   ? pr_req_get(req, "rows") : "0");
-        (void)want;
+        /* Messages filtered by rows param */
         /* new messages since the last poll would be better, but a
          * short window is enough for the display */
         /*
