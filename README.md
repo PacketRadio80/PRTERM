@@ -11,6 +11,25 @@ browser.
 
 > **Status: v0.6.5 and mostly developed enough to be used**
 
+## MailboxD-Text / MailboxD-UI
+
+**MailboxD-Text** is the protocol — the text-based command/response layer over
+the unix socket (`RUN /command` → `OUT lines` → `END`). It is the engine that
+drives everything and remains standalone. All existing features, the retro UI
+(`prterm-alter.cgi`), and CLI access work purely through MailboxD-Text.
+
+**MailboxD-UI** (planned) is a rendering layer on top of MailboxD-Text. PRTERM
+acts as the client/slave, consuming the same text stream and rendering it as a
+richer UI in the browser. The underlying protocol does not change — MailboxD-UI
+is additive. MailboxD-Text continues to work independently as a fallback and as
+a fully functional option on its own.
+
+Design rules:
+- No changes to existing code unless unavoidable; additions only
+- MailboxD-Text is the protocol, the engine, and the fallback — always
+- MailboxD-UI uses MailboxD-Text as its motor — never replaces it
+- Both options coexist; the user chooses text or UI
+
 ---
 
 ## Features
