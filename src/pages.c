@@ -457,11 +457,6 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
     /* Control line */
     pr_buf_add(out, "<div id=\"flash\" class=\"note\" hidden></div>\n");
 
-    pr_buf_addf(out, "<div class=\"note\" id=\"duplexnote\">%s</div>\n",
-        T(cfg, st->duplex == PR_DUPLEX_FULL
-            ? "Full duplex — reception continues while transmitting."
-            : "Half duplex — no reception while transmitting."));
-
     /*
      * The send bar carries exactly what is needed to send: the message
      * line, Send, and the character grid readout on the right.

@@ -94,16 +94,6 @@ static const pr_lang_entry catalog[] = {
       "Verwaltung", "Administración", "Administração", "Administration"),
 
     /* ---- Terminal --------------------------------------------------- */
-    E("Full duplex — reception continues while transmitting.",
-      "Vollduplex — der Empfang läuft während des Sendens weiter.",
-      "Dúplex completo — la recepción continúa mientras se transmite.",
-      "Duplexo completo — a receção continua durante a transmissão.",
-      "Duplex intégral — la réception continue pendant l'émission."),
-    E("Half duplex — no reception while transmitting.",
-      "Halbduplex — während des Sendens wird nicht empfangen.",
-      "Semidúplex — no se recibe mientras se transmite.",
-      "Semiduplexo — não há receção durante a transmissão.",
-      "Semi-duplex — pas de réception pendant l'émission."),
     E("Enter message &#8230;  [Enter] to send",
       "Nachricht eingeben &#8230;  [Enter] zum Senden",
       "Escribir mensaje &#8230;  [Enter] para enviar",
