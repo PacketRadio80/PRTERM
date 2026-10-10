@@ -21,6 +21,7 @@
 #include "kiss.h"
 #include "lang.h"
 #include "tncsock.h"
+#include "mailboxdsock.h"
 #include "state.h"
 #include "util.h"
 
@@ -313,8 +314,9 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
         T(cfg, "Login"),
         T(cfg, "User"), T(cfg, "Password"), T(cfg, "Log in"));
 
-    /* MailboxD terminal output */
-    pr_buf_addf(out, "<pre class=\"term\" id=\"mbox-term\"></pre>\n");
+    /* MailboxD terminal output — full height */
+    pr_buf_addf(out,
+        "<pre class=\"term\" id=\"mbox-term\" style=\"min-height:60vh;max-height:80vh;overflow-y:auto\"></pre>\n");
 
     /* Command form */
     pr_buf_addf(out,
@@ -907,21 +909,169 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         /* ---- MailboxD login ------------------------------------------- */
         if (action != NULL && strcmp(action, "mbox_login") == 0) {
-            pr_mbox_login(req, res, cfg);
+            /* Retro: connect to bridge, send /login, render result as HTML page */
+            const char *user = pr_req_post(req, "user");
+            const char *pass = pr_req_post(req, "pass");
+            if (user == NULL || pass == NULL || user[0] == '\0' || pass[0] == '\0') {
+                /* Re-render mailbox with error */
+                pr_response_html(res, 200);
+                char title[128];
+                snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
+                alter_doc_open(&res->body, cfg, &sess, title);
+                render_topbar(&res->body, cfg, &a.st);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s</div>\n",
+                            T(cfg, "enter user and password"));
+                render_mailbox(&res->body, cfg);
+                alter_doc_close(&res->body);
+                app_stop(&a);
+                return 0;
+            }
+            /* Connect and login */
+            char sock[PR_CFG_PATH];
+            snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+            pr_mailboxdsock m;
+            char err[256];
+            if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0) {
+                pr_response_html(res, 200);
+                char title[128];
+                snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
+                alter_doc_open(&res->body, cfg, &sess, title);
+                render_topbar(&res->body, cfg, &a.st);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: %s</div>\n",
+                            T(cfg, "MailboxD is not connected"), err);
+                render_mailbox(&res->body, cfg);
+                alter_doc_close(&res->body);
+                app_stop(&a);
+                return 0;
+            }
+            char banner[64];
+            pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err);
+            char logincmd[256];
+            snprintf(logincmd, sizeof logincmd, "/login %s %s", user, pass);
+            char out[4096];
+            size_t nlines = 0;
+            int rc = pr_mailboxdsock_run(&m, logincmd, out, sizeof out, &nlines, err, sizeof err);
+            pr_mailboxdsock_close(&m);
+            if (rc == 0) {
+                /* Set cookies and redirect to mailbox */
+                /* Hex-encode user/pass for cookies */
+                char enc_u[256], enc_p[256];
+                pr_tncsock_hex_encode(enc_u, sizeof enc_u, (const unsigned char *)user, strlen(user));
+                pr_tncsock_hex_encode(enc_p, sizeof enc_p, (const unsigned char *)pass, strlen(pass));
+                pr_response_set_cookie(res, "MBOX_U", enc_u, 28800, true);
+                pr_response_set_cookie(res, "MBOX_P", enc_p, 28800, true);
+                pr_response_redirect(res, 302, "prterm-alter.cgi?action=mailbox");
+            } else {
+                pr_response_html(res, 200);
+                char title[128];
+                snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
+                alter_doc_open(&res->body, cfg, &sess, title);
+                render_topbar(&res->body, cfg, &a.st);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s</div>\n",
+                            out[0] != '\0' ? out : err);
+                render_mailbox(&res->body, cfg);
+                alter_doc_close(&res->body);
+            }
             app_stop(&a);
             return 0;
         }
 
         /* ---- MailboxD run command ------------------------------------- */
         if (action != NULL && strcmp(action, "mbox_run") == 0) {
-            pr_mbox_run(req, res, cfg);
+            const char *cmd = pr_req_post(req, "cmd");
+            if (cmd == NULL || cmd[0] == '\0') {
+                pr_response_redirect(res, 302, "prterm-alter.cgi?action=mailbox");
+                app_stop(&a);
+                return 0;
+            }
+            /* Connect, re-login if cookies, run command, render HTML */
+            char sock[PR_CFG_PATH];
+            snprintf(sock, sizeof sock, "%s/prterm.sock", cfg->mailboxd_dir);
+            pr_mailboxdsock m;
+            char err[256];
+            if (pr_mailboxdsock_open(&m, sock, err, sizeof err) != 0) {
+                pr_response_html(res, 200);
+                char title[128];
+                snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
+                alter_doc_open(&res->body, cfg, &sess, title);
+                render_topbar(&res->body, cfg, &a.st);
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s: %s</div>\n",
+                            T(cfg, "MailboxD is not connected"), err);
+                render_mailbox(&res->body, cfg);
+                alter_doc_close(&res->body);
+                app_stop(&a);
+                return 0;
+            }
+            char banner[64];
+            pr_mailboxdsock_hello(&m, 1, banner, sizeof banner, err, sizeof err);
+            /* Silent re-login if cookies present */
+            char mbox_u_enc[256], mbox_p_enc[256];
+            if (pr_req_cookie(req, "MBOX_U", mbox_u_enc, sizeof mbox_u_enc) &&
+                pr_req_cookie(req, "MBOX_P", mbox_p_enc, sizeof mbox_p_enc) &&
+                mbox_u_enc[0] && mbox_p_enc[0]) {
+                char user[128], pass[128];
+                pr_tncsock_hex_decode((unsigned char *)user, sizeof user, mbox_u_enc);
+                pr_tncsock_hex_decode((unsigned char *)pass, sizeof pass, mbox_p_enc);
+                char logincmd[256];
+                snprintf(logincmd, sizeof logincmd, "/login %s %s", user, pass);
+                char lout[2048];
+                size_t llines = 0;
+                pr_mailboxdsock_run(&m, logincmd, lout, sizeof lout, &llines, err, sizeof err);
+            }
+            /* Run the actual command */
+            char out[4096];
+            size_t nlines = 0;
+            int rc = pr_mailboxdsock_run(&m, cmd, out, sizeof out, &nlines, err, sizeof err);
+            pr_mailboxdsock_close(&m);
+            /* Render full HTML page with command output */
+            pr_response_html(res, 200);
+            char title[128];
+            snprintf(title, sizeof title, "%s — MailboxD", cfg->site_name);
+            alter_doc_open(&res->body, cfg, &sess, title);
+            render_topbar(&res->body, cfg, &a.st);
+            if (rc != 0) {
+                const char *msg = out;
+                if (out[0] == '\0') msg = err;
+                pr_buf_addf(&res->body, "<div class=\"flash flash-err\">%s</div>\n", msg);
+            }
+            /* Render mailbox UI with command output in the terminal */
+            render_mailbox(&res->body, cfg);
+            /* Inject the command output into the mbox-term pre */
+            pr_buf_addf(&res->body,
+                "<script>\n"
+                "var t = document.getElementById('mbox-term');\n"
+                "if (t) {\n");
+            /* Split out by lines and add as divs */
+            char *line = out;
+            while (*line) {
+                char *nl = strchr(line, '\n');
+                if (nl) *nl = '\0';
+                if (line[0] != '\0') {
+                    pr_buf_addf(&res->body,
+                        "  var d = document.createElement('div');\n"
+                        "  d.textContent = '%s';\n"
+                        "  t.appendChild(d);\n", line);
+                }
+                if (nl) line = nl + 1; else break;
+            }
+            pr_buf_addf(&res->body,
+                "  t.scrollTop = t.scrollHeight;\n"
+                "}\n"
+                "</script>\n");
+            /* Also show as pre for no-JS fallback */
+            if (out[0] != '\0') {
+                pr_buf_addf(&res->body, "<pre class=\"term\" style=\"max-height:60vh;overflow-y:auto\">\n%s</pre>\n", out);
+            }
+            alter_doc_close(&res->body);
             app_stop(&a);
             return 0;
         }
 
         /* ---- MailboxD logout ------------------------------------------ */
         if (action != NULL && strcmp(action, "mbox_logout") == 0) {
-            pr_mbox_logout(req, res);
+            pr_response_clear_cookie(res, "MBOX_U");
+            pr_response_clear_cookie(res, "MBOX_P");
+            pr_response_redirect(res, 302, "prterm-alter.cgi?action=mailbox");
             app_stop(&a);
             return 0;
         }
