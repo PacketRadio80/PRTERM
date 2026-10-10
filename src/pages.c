@@ -1590,41 +1590,17 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             return 0;
         }
 
-        /* ---- MailboxD device list ------------------------------------------
-         *
-         * action=mbox_devlist
-         *
-         * Returns JSON array of enabled station names so the MailboxD
-         * beacon daemon can manage per-device CQ cycles. */
-        if (strcmp(action, "mbox_devlist") == 0) {
-            pr_response_json(res, 200);
-            pr_buf_add(&res->body, "{\"ok\":true,\"devices\":[");
-            bool first = true;
-            for (size_t di = 0; di < cfg->nstations; di++) {
-                const pr_station *st = &cfg->stations[di];
-                if (!st->enabled) continue;
-                if (!first) pr_buf_add(&res->body, ",");
-                pr_buf_addf(&res->body, "\"%s\"", st->name);
-                first = false;
-            }
-            pr_buf_add(&res->body, "]}");
-            app_stop(&a);
-            return 0;
-        }
-
         /* ---- MailboxD CQ beacon cycle ------------------------------------
          *
          * action=mbox_cqbeacon&callerid=MGHBX1&msg=MGHBX1+%3D+online
-         *         [&station=tnc2c]   (optional: target one station only)
          *
-         * Checks band-free on the given station (or first available)
-         * and sends an AX.25 CQ frame.  Used by MailboxD's beacon
-         * daemon thread — either for a global sweep or per-device. */
+         * Cycles through all configured stations, checks band-free
+         * (≥150 s silence) on each, and sends an AX.25 CQ frame from
+         * the given callerid via the first available device.  Used by
+         * MailboxD's beacon daemon thread. */
         if (strcmp(action, "mbox_cqbeacon") == 0) {
             const char *cid = pr_req_param(req, "callerid");
             const char *msg = pr_req_param(req, "msg");
-            const char *target_station = pr_req_param(req, "station");
-            bool target_set = (target_station != NULL && target_station[0] != '\0');
             if (cid == NULL || cid[0] == '\0') {
                 json_err(res, pr_tr(cfg->language, "callerid is required"));
                 app_stop(&a);
@@ -1641,15 +1617,13 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
 
-            /* Scan all stations looking for one whose band is free.
-             * If station= is set, only try that one station. */
+            /* Scan all stations looking for one whose band is free. */
             long long now = pr_now_s();
             bool transmitted = false;
             char used_device[64] = "";
             for (size_t si = 0; si < cfg->nstations && !transmitted; si++) {
                 const pr_station *sta = &cfg->stations[si];
                 if (!sta->enabled) continue;
-                if (target_set && strcmp(sta->name, target_station) != 0) continue;
 
                 long long last = a.st.last_rx_ts;
                 if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
