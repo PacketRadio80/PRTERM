@@ -91,6 +91,26 @@ endfunction()
 prterm_embed_asset(prterm.css prterm_css PRTERM_CSS_SRC)
 prterm_embed_asset(prterm.js  prterm_js  PRTERM_JS_SRC)
 
+# Retro/alternative assets — same symbol names as modern (prterm_css, prterm_js)
+# so html.c works unchanged, but different source files.
+# The gen dir gets separate output files to avoid conflicts.
+set(_alter_css_out "${PRTERM_GEN_DIR}/embed_alter_prterm_css.c")
+set(_alter_js_out  "${PRTERM_GEN_DIR}/embed_alter_prterm_js.c")
+add_custom_command(
+    OUTPUT  "${_alter_css_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.css" "${_alter_css_out}" "prterm_css"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.css"
+    COMMENT "ASSET  web/prterm-alter.css -> prterm_css (alter)"
+    VERBATIM)
+add_custom_command(
+    OUTPUT  "${_alter_js_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.js" "${_alter_js_out}" "prterm_js"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.js"
+    COMMENT "ASSET  web/prterm-alter.js -> prterm_js (alter)"
+    VERBATIM)
+set(PRTERM_ALTER_CSS_SRC "${_alter_css_out}")
+set(PRTERM_ALTER_JS_SRC  "${_alter_js_out}")
+
 # ---------------------------------------------------------------------------
 # Core library (also linked by the tests)
 # ---------------------------------------------------------------------------
@@ -153,6 +173,33 @@ add_executable(prterm src/main.c)
 target_link_libraries(prterm PRIVATE prterm_core)
 target_compile_options(prterm PRIVATE ${PRTERM_WARN_FLAGS})
 set_target_properties(prterm PROPERTIES OUTPUT_NAME "prterm.cgi" PREFIX "")
+
+# ---------------------------------------------------------------------------
+# The retro/alternative CGI binary (prterm-alter.cgi)
+#
+# Same core as prterm.cgi but with a different page rendering layer
+# (pages_alter.c instead of pages.c) and retro web assets.
+# Works in text browsers (lynx, links, w3m) and on retro computers.
+# ---------------------------------------------------------------------------
+set(PRTERM_ALTER_CORE_SOURCES ${PRTERM_CORE_SOURCES})
+list(REMOVE_ITEM PRTERM_ALTER_CORE_SOURCES src/pages.c "${PRTERM_CSS_SRC}" "${PRTERM_JS_SRC}")
+list(APPEND PRTERM_ALTER_CORE_SOURCES src/pages_alter.c "${PRTERM_ALTER_CSS_SRC}" "${PRTERM_ALTER_JS_SRC}")
+
+add_library(prterm_alter_core STATIC ${PRTERM_ALTER_CORE_SOURCES})
+target_include_directories(prterm_alter_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_options(prterm_alter_core PRIVATE ${PRTERM_WARN_FLAGS})
+target_link_libraries(prterm_alter_core PUBLIC Threads::Threads)
+foreach(_def IN ITEMS
+        PRTERM_RIG_SIM=$<BOOL:${PRTERM_RIG_SIM}>
+        PRTERM_RIG_TNC2=$<BOOL:${PRTERM_RIG_TNC2}>
+        PRTERM_RIG_TMODEM=$<BOOL:${PRTERM_RIG_TMODEM}>)
+    target_compile_definitions(prterm_alter_core PRIVATE ${_def})
+endforeach()
+
+add_executable(prterm-alter src/main_alter.c)
+target_link_libraries(prterm-alter PRIVATE prterm_alter_core)
+target_compile_options(prterm-alter PRIVATE ${PRTERM_WARN_FLAGS})
+set_target_properties(prterm-alter PROPERTIES OUTPUT_NAME "prterm-alter.cgi" PREFIX "")
 
 # ---------------------------------------------------------------------------
 # The device daemon - keeps the serial ports open and holds KISS

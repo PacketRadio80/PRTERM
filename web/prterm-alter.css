@@ -1,0 +1,144 @@
+/*
+ * PRTERM Alter — minimal retro CSS.
+ * Works without it; adds just enough for readability.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+body {
+    font-family: monospace;
+    background: #1a1a2e;
+    color: #c8d0d8;
+    margin: 0;
+    padding: 0.5em;
+    line-height: 1.4;
+}
+
+a { color: #6ec6ff; }
+a:visited { color: #b39ddb; }
+
+h1, h2, h3 {
+    color: #e0e0e0;
+    border-bottom: 1px solid #333;
+    padding-bottom: 0.2em;
+}
+
+pre, code {
+    background: #0d0d1a;
+    color: #a0d0a0;
+    padding: 0.3em;
+    border: 1px solid #333;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+pre.term {
+    background: #0a0a12;
+    color: #c8d0d8;
+    border: 1px solid #2a2a4a;
+    padding: 0.5em;
+    min-height: 12em;
+    max-height: 60vh;
+    overflow-y: auto;
+    font-size: 0.9em;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.5em 0;
+}
+
+th, td {
+    border: 1px solid #333;
+    padding: 0.3em 0.5em;
+    text-align: left;
+}
+
+th { background: #2a2a4a; color: #e0e0e0; }
+tr:nth-child(even) { background: #16162e; }
+
+input[type="text"], input[type="password"], textarea, select {
+    background: #0d0d1a;
+    color: #c8d0d8;
+    border: 1px solid #555;
+    padding: 0.3em;
+    font-family: monospace;
+    font-size: 1em;
+}
+
+input[type="submit"], button {
+    background: #2a2a6a;
+    color: #e0e0e0;
+    border: 1px solid #555;
+    padding: 0.3em 1em;
+    cursor: pointer;
+    font-family: monospace;
+}
+
+input[type="submit"]:hover, button:hover {
+    background: #3a3a8a;
+}
+
+.topbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5em;
+    align-items: center;
+    padding: 0.3em;
+    background: #16162e;
+    border-bottom: 1px solid #333;
+    margin-bottom: 0.5em;
+}
+
+.topbar .brand { font-weight: bold; color: #6ec6ff; }
+.topbar .chip {
+    display: inline-block;
+    background: #2a2a4a;
+    padding: 0.1em 0.5em;
+    border: 1px solid #444;
+    font-size: 0.9em;
+}
+
+.topbar form { display: inline; }
+
+.txbar {
+    display: flex;
+    gap: 0.3em;
+    align-items: center;
+    margin-top: 0.5em;
+}
+
+.txbar input[type="text"] {
+    flex: 1;
+}
+
+.flash {
+    padding: 0.3em;
+    margin: 0.3em 0;
+    border: 1px solid;
+}
+
+.flash-ok { border-color: #4caf50; background: #1b3a1b; }
+.flash-err { border-color: #f44336; background: #3a1b1b; }
+.flash-warn { border-color: #ff9800; background: #3a2a1b; }
+
+/* Message types in terminal */
+.ln-rx { color: #a0d0a0; }
+.ln-tx { color: #6ec6ff; }
+.ln-sys { color: #b39ddb; }
+.ln-warn { color: #ff9800; }
+.ln-err { color: #f44336; }
+
+.note { font-size: 0.85em; color: #888; margin: 0.2em 0; }
+.warn { color: #ff9800; }
+.err { color: #f44336; }
+
+form.inline { display: inline; }
+
+@media (max-width: 600px) {
+    body { padding: 0.2em; }
+    .topbar { flex-direction: column; align-items: flex-start; }
+    pre.term { max-height: 50vh; }
+}
