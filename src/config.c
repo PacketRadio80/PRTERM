@@ -270,6 +270,9 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     cfg->mailboxd_enabled = ini_get_bool(i, "mailboxd", "enabled", false);
     copy_str(cfg->mailboxd_dir, sizeof cfg->mailboxd_dir,
              i, "mailboxd", "dir", "/var/mailboxd");
+    copy_str(cfg->mailboxd_beacon_station,
+             sizeof cfg->mailboxd_beacon_station,
+             i, "mailboxd", "beacon_station", "");
 
     /* [daemon] NO-AUTO-TX door. */
     cfg->resend_kiss_params = ini_get_bool(
@@ -390,6 +393,7 @@ void pr_config_write(const pr_config *cfg, ini *i)
 
     ini_set_bool(i, "mailboxd", "enabled", cfg->mailboxd_enabled);
     ini_set(i, "mailboxd", "dir", cfg->mailboxd_dir);
+    ini_set(i, "mailboxd", "beacon_station", cfg->mailboxd_beacon_station);
 
     ini_set(i, "debug", "level",
             pr_trace_level_name((pr_trace_level)cfg->debug_level));

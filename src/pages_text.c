@@ -1090,26 +1090,24 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
             long long now = pr_now_s();
-            bool transmitted = false;
-            char used_device[64] = "";
-            for (size_t si = 0; si < cfg->nstations && !transmitted; si++) {
-                const pr_station *sta = &cfg->stations[si];
-                if (!sta->enabled) continue;
-                long long last = a.st.last_rx_ts;
-                if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
-                long long silent = (last > 0) ? (now - last) : 999;
-                if (silent < 150) continue;
-                char err[256];
-                if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
-                    transmitted = true;
-                    pr_strlcpy(used_device, sta->name, sizeof used_device);
-                }
+            long long last = a.st.last_rx_ts;
+            if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
+            long long silent = (last > 0) ? (now - last) : 999;
+            if (silent < 150) {
+                long remaining = 150 - (long)silent;
+                char msg_buf[256];
+                snprintf(msg_buf, sizeof msg_buf,
+                         T(cfg, "channel not clear — wait %ld s (need 150 s silence)"),
+                         remaining);
+                json_err(res, msg_buf);
+                app_stop(&a);
+                return 0;
             }
-            if (transmitted) {
-                pr_response_json(res, 200);
-                pr_buf_addf(&res->body, "{\"ok\":true,\"device\":\"%s\"}", used_device);
+            char err[256];
+            if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
+                json_ok(res);
             } else {
-                json_err(res, T(cfg, "no device available (all busy or disabled)"));
+                json_err(res, err);
             }
             app_stop(&a);
             return 0;

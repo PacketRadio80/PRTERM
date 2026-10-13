@@ -1613,12 +1613,15 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         /* ---- MailboxD CQ beacon cycle ------------------------------------
          *
-         * action=mbox_cqbeacon&callerid=MGHBX1&msg=MGHBX1+%3D+online
+         * action=mbox_cqbeacon&callerid=MGHBX1&msg=MGHBX1+%3D+online&station=bc0
          *
-         * Cycles through all configured stations, checks band-free
-         * (≥150 s silence) on each, and sends an AX.25 CQ frame from
-         * the given callerid via the first available device.  Used by
-         * MailboxD's beacon daemon thread. */
+         * Single-station CQ beacon.  The active station is already bound
+         * by pr_config_apply_station (from the `station=NAME` request
+         * param or the first enabled station).  The beacon daemon calls
+         * this once per station, with a delay between calls, so each
+         * channel's band-free timer is checked independently.
+         * Radio lives entirely in PRTERM (MailboxD has no TNC or
+         * serial code). */
         if (strcmp(action, "mbox_cqbeacon") == 0) {
             const char *cid = pr_req_param(req, "callerid");
             const char *msg = pr_req_param(req, "msg");
@@ -1638,37 +1641,30 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
 
-            /* Scan all stations looking for one whose band is free. */
             long long now = pr_now_s();
-            bool transmitted = false;
-            char used_device[64] = "";
-            for (size_t si = 0; si < cfg->nstations && !transmitted; si++) {
-                const pr_station *sta = &cfg->stations[si];
-                if (!sta->enabled) continue;
+            long long last = a.st.last_rx_ts;
+            if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
+            long long silent = (last > 0) ? (now - last) : 999;
 
-                long long last = a.st.last_rx_ts;
-                if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
-                long long silent = (last > 0) ? (now - last) : 999;
-
-                if (silent < 150) continue;
-
-                /* Transmit CQ beacon.  'cid' is the MailboxD
-                 * callerid (from mailboxd.ini), NOT PRTERM's own
-                 * callerid — MGHBX1 appears as the AX.25 source. */
-                char err[256];
-                if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
-                    transmitted = true;
-                    pr_strlcpy(used_device, sta->name, sizeof used_device);
-                }
+            if (silent < 150) {
+                long remaining = 150 - (long)silent;
+                char msg_buf[256];
+                pr_trf(msg_buf, sizeof msg_buf,
+                       "channel not clear — wait %ld s (need 150 s silence)",
+                       remaining);
+                json_err(res, msg_buf);
+                app_stop(&a);
+                return 0;
             }
 
-            if (transmitted) {
+            char err[256];
+            if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
                 pr_response_json(res, 200);
                 pr_buf_add(&res->body, "{\"ok\":true,\"device\":\"");
-                pr_json_escape(&res->body, used_device);
+                pr_json_escape(&res->body, station->name);
                 pr_buf_add(&res->body, "\"}");
             } else {
-                json_err(res, pr_tr(cfg->language, "no device available (all busy or disabled)"));
+                json_err(res, err);
             }
             app_stop(&a);
             return 0;

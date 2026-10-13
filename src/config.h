@@ -137,6 +137,13 @@ typedef struct pr_config {
      * (/var/mailboxd, /usr/mailboxd, /usr/local/mailboxd).
      */
     char mailboxd_dir[PR_CFG_PATH];
+    /*
+     * Station used for the MailboxD CQ beacon and broadcasts. Empty means
+     * cycle through all enabled stations and use the first band-free one.
+     * The beacon arrives as mbox_cqbeacon; the radio side is decided here,
+     * MailboxD has no TNC or serial code.
+     */
+    char mailboxd_beacon_station[32];
 
     /*
      * [debug]
