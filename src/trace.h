@@ -16,6 +16,8 @@
 #ifndef PRTERM_TRACE_H
 #define PRTERM_TRACE_H
 
+#include "prterm_compat.h"
+
 #include <stddef.h>
 
 typedef enum pr_trace_level {
@@ -38,7 +40,7 @@ void           pr_trace_init(pr_trace_level lv, const char *ctx);
 pr_trace_level pr_trace_get_level(void);
 
 /* One line to stderr when the level is enabled. */
-void pr_trace(pr_trace_level lv, const char *fmt, ...);
+void pr_trace(pr_trace_level lv, const char *fmt, ...) PR_FMT_PRINTF(2, 3);
 
 /*
  * Hexdump (16 bytes per line: offset, hex, ASCII), capped so a

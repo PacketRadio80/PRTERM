@@ -1,0 +1,31 @@
+# PRTERM device daemon (Linux / systemd)
+# Installed as: /etc/systemd/system/prterm-tncd.service
+#
+# Keeps the TNC serial ports open and holds KISS; one Unix socket per
+# station under runtime_dir. Same user as the lighttpd CGI (lighttpd),
+# so both ends of the socket match.
+#
+# PATHS ARE EXAMPLES — adjust PREFIX (/var/prterm) to your install, and
+# make it match prterm-baycom.service -s <runtime_dir> exactly: baycomd
+# creates the KISS PTY there, tncd opens it.
+#
+# Start order: prterm-baycom BEFORE prterm-tncd (see After= below).
+
+[Unit]
+Description=PRTERM TNC daemon (holds serial ports + KISS)
+After=network.target prterm-baycom.service
+
+[Service]
+ExecStart=/var/prterm/prterm-tncd /var/prterm/prterm.ini
+WorkingDirectory=/var/prterm
+User=lighttpd
+Group=lighttpd
+SupplementaryGroups=dialout
+Restart=on-failure
+RestartSec=30
+# PrivateDevices=yes would give the service its own /dev and hide
+# /dev/ttyUSB* and /dev/serial (see PRTERM/docs/lighttpd-systemd.conf).
+PrivateDevices=no
+
+[Install]
+WantedBy=multi-user.target

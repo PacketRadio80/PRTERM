@@ -99,6 +99,7 @@ void pr_config_defaults(pr_config *cfg)
     cfg->ui_rows    = 0;
     cfg->ui_columns = 0;
     pr_strlcpy(cfg->ui_theme, "silver", sizeof cfg->ui_theme);
+    cfg->typewriter_baud = 0;   /* 0 = auto (use radio_baud) */
 
     pr_strlcpy(cfg->runtime_dir, "./prterm.runtime", sizeof cfg->runtime_dir);
 
@@ -299,6 +300,13 @@ int pr_config_apply(pr_config *cfg, const ini *i, char *err, size_t errlen)
     cfg->ui_rows    = (int)clamp_long(ini_get_int(i, "ui", "rows", 0), 0, 500);
     cfg->ui_columns = (int)clamp_long(ini_get_int(i, "ui", "columns", 0), 0, 500);
     copy_str(cfg->ui_theme, sizeof cfg->ui_theme, i, "ui", "theme", "silver");
+    {
+        const char *tw = ini_get(i, "ui", "typewriter_baud", "auto");
+        if (tw == NULL || tw[0] == '\0' || strcmp(tw, "auto") == 0)
+            cfg->typewriter_baud = 0;
+        else
+            cfg->typewriter_baud = atoi(tw);
+    }
 
     /* [paths] */
     copy_str(cfg->runtime_dir, sizeof cfg->runtime_dir, i, "paths", "runtime_dir",

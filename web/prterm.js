@@ -50,6 +50,48 @@
     return (window.PRTERM_L && window.PRTERM_L[s]) || s;
   }
 
+  /* ---- Typewriter effect ------------------------------------------------
+   * Reveals text character by character, like a real terminal.
+   * `el` is the target element, `text` is the full string,
+   * `cb` is called when done (optional). Speed from server state.
+   */
+  var twDelay = 40;  /* default: 2400 baud = 40ms/char */
+  function typewrite(el, text, cb) {
+    if (!el || text == null) { if (cb) cb(); return; }
+    if (text === "") {
+      el.textContent = "\n";
+      scrollTerm();
+      if (cb) cb();
+      return;
+    }
+    el.classList.add("tw-cursor");
+    var i = 0;
+    var iv = setInterval(function () {
+      el.textContent = text.substring(0, ++i);
+      scrollTerm();
+      if (i >= text.length) {
+        clearInterval(iv);
+        el.classList.remove("tw-cursor");
+        if (cb) cb();
+      }
+    }, twDelay);
+  }
+
+  /* Typewriter queue — processes lines one at a time so they
+   * appear in order, not all at once. */
+  var twQueue = [];
+  var twBusy = false;
+  function typewriteLine(el, text) {
+    twQueue.push({ el: el, text: text });
+    if (!twBusy) twProcess();
+  }
+  function twProcess() {
+    if (!twQueue.length) { twBusy = false; return; }
+    twBusy = true;
+    var item = twQueue.shift();
+    typewrite(item.el, item.text, twProcess);
+  }
+
   /* ----------------------------------------------------------------------
      Character grid: as many characters as font size and resolution allow
      ---------------------------------------------------------------------- */
@@ -135,11 +177,12 @@
     if (!term) return;
     cls = cls || "ln ln-sys";
     for (var i = 0; i < lines.length; i++) {
-      if (!lines[i]) continue;
+      if (lines[i] == null) continue;
       var span = document.createElement("span");
       span.className = cls;
-      span.textContent = lines[i] + "\n";
+      /* All lines through typewriter queue */
       term.appendChild(span);
+      typewriteLine(span, lines[i] + "\n");
     }
     term.scrollTop = term.scrollHeight;
   }
@@ -254,7 +297,7 @@
      * show the login form again. */
     if (/^\/(logout|quit|bye)\b/i.test(cmd)) {
       post({ action: "mbox_logout" }, function () {
-        mboxAppend([cmd], "ln ln-cmd");
+        mboxAppend(["> " + cmd], "ln ln-cmd");
         mboxAppend([L("Logged out.")], "ln ln-sys");
         mboxPanel("login");
       });
@@ -262,7 +305,7 @@
     }
 
     /* Echo the command locally. */
-    mboxAppend([cmd], "ln ln-cmd");
+    mboxAppend(["> " + cmd], "ln ln-cmd");
 
     /* Intercept /broadcast — PRTERM checks band-free time and
      * transmits over RF via the real TNC, then we forward to
@@ -367,7 +410,6 @@
     var t = $("term");
     if (!t) return;
 
-    var html = "";
     var stick = t.scrollHeight - t.scrollTop - t.clientHeight < 24;
 
     for (var i = 0; i < items.length; i++) {
@@ -383,23 +425,41 @@
           ("0" + d.getMinutes()).slice(-2) + ":" +
           ("0" + d.getSeconds()).slice(-2);
       }
-      html +=
-        '<span class="' + cls + '">' +
+      var prefix =
         '<span class="t">' + time + "</span> " +
-        /* Which device picked it up - only needed in "All".     */
         (m.station && !S.rxtx
           ? '<span class="dev">@' + esc(m.station) + "</span> " : "") +
-        (m.from ? '<span class="who">' + esc(m.from) + "</span> " : "") +
-        '<span class="tx">' + esc(m.text) + "</span>" +
-        (m.db && m.db !== 0 ? ' <span class="db">' + m.db + " dB</span>" : "") +
-        "</span>";
+        (m.from ? '<span class="who">' + esc(m.from) + "</span> " : "");
+      var suffix =
+        (m.db && m.db !== 0 ? ' <span class="db">' + m.db + " dB</span>" : "");
+
+      /* Last message in batch: typewriter effect */
+      if (i === items.length - 1) {
+        var span = document.createElement("span");
+        span.className = cls;
+        span.innerHTML = prefix;
+        var txSpan = document.createElement("span");
+        txSpan.className = "tx";
+        span.appendChild(txSpan);
+        if (suffix) {
+          var tmp = document.createElement("span");
+          tmp.innerHTML = suffix;
+          span.appendChild(tmp.firstChild);
+        }
+        t.appendChild(span);
+        typewriteLine(txSpan, m.text);
+      } else {
+        /* Older messages: instant */
+        var html =
+          '<span class="' + cls + '">' + prefix +
+          '<span class="tx">' + esc(m.text) + "</span>" +
+          suffix + "</span>";
+        t.insertAdjacentHTML("beforeend", html);
+      }
     }
-    if (html) {
-      t.insertAdjacentHTML("beforeend", html);
-      /* limit so the DOM does not grow         */
-      while (t.childNodes.length > 900) t.removeChild(t.firstChild);
-      if (stick) scrollTerm();
-    }
+    /* limit so the DOM does not grow */
+    while (t.childNodes.length > 900) t.removeChild(t.firstChild);
+    scrollTerm();
   }
 
   /* Rebuild the terminal completely from the stock - needed when
@@ -582,6 +642,7 @@
         if (!j) return;
         S.loggedIn = !!j.logged_in;
         renderState(j);
+        if (j.typewriter_ms !== undefined) twDelay = j.typewriter_ms;
         if (j.callerid !== undefined) S.callerid = j.callerid;
         if (j.mailboxd_status !== undefined) {
           var prev = S.mbox_status;
@@ -805,6 +866,16 @@
         schedulePoll();
       }, ms);
     })();
+
+    /* Immediate poll when the tab becomes visible again — browsers throttle
+     * setInterval/setTimeout in background tabs, so without this the display
+     * goes stale while the user is on another tab. */
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) {
+        S.pollFast = true;
+        refresh(true);
+      }
+    });
   }
 
   if (document.readyState === "loading") {

@@ -87,7 +87,6 @@ void pr_trace(pr_trace_level lv, const char *fmt, ...)
 {
     if (!enabled(lv))
         return;
-
     char ts[40];
     stamp(ts, sizeof ts);
     fprintf(stderr, "[%s] %s %s: ", ts, g_ctx, pr_trace_level_name(lv));

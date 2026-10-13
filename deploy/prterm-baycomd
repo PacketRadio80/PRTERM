@@ -1,0 +1,84 @@
+#!/bin/sh
+#
+# PROVIDE: prterm_baycomd
+# REQUIRE: LOGIN NETWORKING
+# KEYWORD: shutdown
+#
+# /etc/rc.conf:
+#   prterm_baycomd_enable="YES"
+#   prterm_baycomd_device="/dev/cuau0"
+#   prterm_baycomd_iobase="0x3f8"
+#   prterm_baycomd_baud="1200"
+#   prterm_baycomd_tag="bc0"
+#
+# BayCom/Compa PC-COM SER12 modem daemon.  Drives a TCM3105 AFSK modem
+# via direct UART register access (RTS = PTT, TXD = data, CTS/DSR = RX).
+# Exposes a KISS PTY at <runtime_dir>/kiss-<tag> for prterm-tncd.
+#
+# Runs as ROOT — ioperm/inb/outb require elevated privileges.
+
+. /etc/rc.subr
+
+name="prterm_baycomd"
+rcvar="${name}_enable"
+
+load_rc_config $name
+
+: ${prterm_baycomd_enable:="NO"}
+: ${prterm_baycomd_device:="/dev/cuau0"}
+: ${prterm_baycomd_iobase:="0x3f8"}
+: ${prterm_baycomd_baud:="1200"}
+: ${prterm_baycomd_tag:="bc0"}
+
+pidfile="/var/prterm/prterm-baycomd.pid"
+command="/var/prterm/prterm-baycom"
+command_args="-d ${prterm_baycomd_device} -i ${prterm_baycomd_iobase} -b ${prterm_baycomd_baud} -t ${prterm_baycomd_tag} -s /var/prterm/prterm.runtime"
+
+start_cmd="baycomd_start"
+stop_cmd="baycomd_stop"
+status_cmd="baycomd_status"
+
+baycomd_start()
+{
+    if [ -f "${pidfile}" ] && kill -0 $(cat "${pidfile}") 2>/dev/null; then
+        echo "${name} already running (pid=$(cat ${pidfile}))."
+        return 1
+    fi
+
+    if [ ! -x "${command}" ]; then
+        echo "${command} not found or not executable"
+        return 1
+    fi
+
+    # Ensure runtime dir exists
+    mkdir -p /var/prterm/prterm.runtime
+    chown lighttpd:lighttpd /var/prterm/prterm.runtime 2>/dev/null
+
+    /usr/sbin/daemon -p "${pidfile}" \
+        ${command} ${command_args}
+
+    echo "Starting ${name} (${prterm_baycomd_device} @ ${prterm_baycomd_baud} baud, iobase=${prterm_baycomd_iobase})."
+}
+
+baycomd_stop()
+{
+    if [ ! -f "${pidfile}" ]; then
+        echo "${name} not running."
+        return 1
+    fi
+    kill $(cat "${pidfile}") 2>/dev/null
+    rm -f "${pidfile}"
+    echo "Stopping ${name}."
+}
+
+baycomd_status()
+{
+    if [ -f "${pidfile}" ] && kill -0 $(cat "${pidfile}") 2>/dev/null; then
+        echo "${name} is running as pid $(cat ${pidfile})."
+    else
+        echo "${name} is not running."
+        rm -f "${pidfile}" 2>/dev/null
+    fi
+}
+
+run_rc_command "$1"

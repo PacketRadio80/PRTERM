@@ -9,7 +9,7 @@ packet radio hardware and software, on the amateur and citizen bands. It is
 extensible through plugins for more features, and it is usable remotely from a
 browser.
 
-> **Status: earlier development (0.5.0).**
+> **Status: development version (0.8.5)**
 
 ---
 
@@ -246,6 +246,7 @@ Print it yourself with `./prterm.cgi --channels`.
 |---|---|---|---|
 | `sim` | — | simulation | works |
 | `tnc2` | Landolt TNC2C, PK-TNC2 (TNC2 clones) | KISS + ESC host mode | in use |
+| `tnc2` (`kiss_init=native`) | BayCom/Compa/PC-COM SER12 modem via `prterm-baycom` | KISS over a PTY | in use |
 | `tmodem` | T-Modem (half-TNC) | ESC host frames | planned |
 
 Connected via a serial port or a USB-SERIAL converter.
@@ -255,17 +256,48 @@ Connected via a serial port or a USB-SERIAL converter.
 | Linux | `/dev/ttyUSB0`, `/dev/ttyS0`, `/dev/serial/by-id/…` | `/dev/ttyACM0` |
 | FreeBSD | `/dev/cuaU0` | `/dev/cuaU0` |
 
-**Not supported today:** Baycom and ARDOP. They are on the roadmap, on two
-different paths:
+### BayCom / Compa / PC-COM (SER12 AFSK modem)
 
-- **Baycom** — will be studied and built into PRTERM later.
-- **ARDOP** — later still, and only as an **external plugin that talks to ARDOP
-  software**. No ARDOP code goes inside PRTERM; it is an adapter, not an
-  integration.
+A BayCom-class modem (Albrecht **PC-COM**, Compa, TFPCX …) is **not a TNC** —
+it is a bare TCM3105 AFSK modem. The host does all HDLC framing, KISS and
+bit-clocking. `prterm-baycom` (a standalone root daemon) bit-bangs the SER12
+waveform straight into the UART registers and exposes a KISS PTY that
+`prterm-tncd` picks up as a normal station with `kiss_init = native`. The
+SER12 / Soft-DCD / HDLC core is ported from the MAX25-Stack reference
+(Linux `baycom_ser_fdx.c` / `hdlcdrv.c`, Thomas Sailer, GPL-2.0) and runs
+unchanged on **Linux and FreeBSD**. See [`docs/BAYCOM.md`](docs/BAYCOM.md).
+
+> **Continuous-carrier ("Dauersenden") protection — read this.**
+>
+> A stuck transmitter destroys the radio's final stage and blocks the whole
+> channel, so `prterm-baycom` **can never hold a carrier**: PTT is keyed only
+> while HDLC data is actively shifting out, and four independent guards drop
+> it again:
+>
+> | Guard | Default | Effect |
+> |---|---|---|
+> | Frame-driven PTT | — | keys only during a frame, always releases on the tail flag |
+> | PTT watchdog | 14.5 s key / 0.5 s pause | drops RTS periodically on a sustained key |
+> | Time-out timer | 25 s single key, 3 consecutive or 8 total bursts | force-unkey + latch until daemon restart |
+> | CSMA p-persistence | 10 ms slot, 40/255 | listens first, never keys a busy channel |
+>
+> A TOT trip writes `tot-trip-<tag>` into the runtime dir and refuses further
+> TX until you restart the daemon. Every transmit logs telemetry to
+> `tx-last-<tag>` (`thr_rate`, `max_tick_gap_us`, `ptt_ms`) so a dead or stuck
+> TX is traceable without a scope. **If a BayCom/Compa/PC-COM ever produces a
+> continuous carrier, that is a bug — please open an issue at
+> <https://github.com/PacketRadio80/PRTERM/issues>** with your platform, serial
+> port, `baycom-diag.log` and `tx-last-<tag>`.
+
+**Not supported today:** ARDOP. It is on the roadmap, and only as an
+**external plugin that talks to ARDOP software**. No ARDOP code goes inside
+PRTERM; it is an adapter, not an integration.
 
 Out of scope for good: sound-card modems such as VARA. Those boards are bare
 modems — the host would have to do HDLC and bit timing straight into the UART
-registers. That is a different class of device, not a TNC.
+registers. That is a different class of device, not a TNC. (BayCom/PC-COM is
+the one SER12 exception, handled by the dedicated `prterm-baycom` daemon
+above.)
 
 ### The device daemon
 

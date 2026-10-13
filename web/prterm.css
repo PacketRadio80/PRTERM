@@ -376,6 +376,14 @@ input::placeholder, textarea::placeholder { color: var(--fg-faint); }
 .ln-sys     { color: var(--fg-dim); font-style: italic; }
 .ln-warn    { color: var(--warn); }
 .ln-err     { color: var(--err); }
+
+/* Typewriter cursor on actively typing lines */
+.tw-cursor::after {
+  content: "\2588";
+  animation: blink 0.6s step-end infinite;
+  color: var(--fg);
+}
+@keyframes blink { 50% { opacity: 0; } }
 .ln-cmd     { color: var(--accent); }
 .ln-banned  { color: var(--banned); text-decoration: line-through; opacity: .75; }
 .ln .db {

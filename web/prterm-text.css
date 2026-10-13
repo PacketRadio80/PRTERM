@@ -1,0 +1,85 @@
+/* prterm-text.css — Clean, text-browser-friendly styles */
+
+body {
+    font-family: monospace;
+    max-width: 96ch;
+    margin: 0 auto;
+    padding: 1ch;
+    background: #fff;
+    color: #000;
+}
+
+.topbar {
+    border-bottom: 2px solid #000;
+    padding-bottom: 0.5em;
+    margin-bottom: 1em;
+}
+
+.brand { font-weight: bold; font-size: 1.2em; }
+
+.chip {
+    display: inline;
+    margin-right: 1em;
+}
+
+pre.term {
+    border: 1px solid #666;
+    padding: 0.5em;
+    overflow-y: auto;
+    max-height: 60vh;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #f8f8f8;
+}
+
+.term div, .term span { margin: 0; padding: 0; display: block; }
+
+.ln-rx  { color: #060; }
+.ln-tx  { color: #006; }
+.ln-sys { color: #333; }
+.ln-warn { color: #660; }
+.ln-err { color: #600; }
+
+.txbar {
+    margin: 0.5em 0;
+    padding: 0.5em 0;
+    border-top: 1px solid #ccc;
+}
+
+.flash {
+    padding: 0.5em;
+    margin: 0.5em 0;
+    border: 1px solid;
+}
+.flash-ok  { border-color: #060; background: #efe; color: #060; }
+.flash-err { border-color: #600; background: #fee; color: #600; }
+.flash-warn { border-color: #660; background: #ffc; color: #660; }
+
+table {
+    border-collapse: collapse;
+    margin: 0.5em 0;
+}
+td, th {
+    padding: 0.2em 0.5em;
+    text-align: left;
+    vertical-align: top;
+}
+
+h2 { border-bottom: 1px solid #999; padding-bottom: 0.2em; }
+h3 { margin-top: 1em; }
+
+.inline { display: inline; }
+a { color: #006; }
+
+input, select, textarea {
+    font-family: monospace;
+    font-size: 1em;
+    padding: 0.2em;
+}
+
+input[type="submit"] {
+    cursor: pointer;
+    padding: 0.3em 1em;
+}
+
+hr { border: none; border-top: 1px solid #999; margin: 1em 0; }

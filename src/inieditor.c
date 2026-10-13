@@ -12,6 +12,7 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "prterm_compat.h"
 #include "inieditor.h"
 #include "html.h"
 #include "ini.h"
@@ -267,6 +268,7 @@ int pr_inieditor_save(pr_request *req, pr_response *res,
                        char *flash_out, size_t flash_len,
                        char *err, size_t errlen)
 {
+    (void)res;
     char path[PR_CFG_PATH];
     if (target_resolve(target, cfg, path, sizeof path) != 0) {
         snprintf(err, errlen, "unknown target %.40s", target ? target : "(null)");

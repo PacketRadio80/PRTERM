@@ -41,7 +41,7 @@ typedef struct pr_station {
     long radio_baud;               /* FIXED - hardware, not changeable   */
     char modem[32];
     char serial_line[8];
-    char kiss_init[16];           /* "esc", "auto" or "tapr" - radio.h  */
+    char kiss_init[16];           /* "esc", "auto", "tapr" or "native" */
     /*
      * Per-station modulation: PR_BAND_FM / _AM / _SSB, or 0 = inherit
      * the global [radio] mode. The compliance gate checks THIS value
@@ -169,6 +169,7 @@ typedef struct pr_config {
     int  ui_rows;
     int  ui_columns;
     char ui_theme[16];
+    int  typewriter_baud;         /* 0 = auto (use radio_baud), >0 = fixed baud */
 
     /* [ban] */
     pr_ban *bans;

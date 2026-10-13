@@ -152,6 +152,44 @@ static int app_start(app *a, pr_config *cfg)
         }
     }
 
+    /*
+     * Read daemon events (power-cycle, repair, etc.) from the event file.
+     * The daemon writes one TSV line per event; we read, parse, and
+     * append to the log, then truncate the file.
+     */
+    {
+        char evpath[512];
+        FILE *evf;
+
+        snprintf(evpath, sizeof evpath, "%s/tnc-events", cfg->runtime_dir);
+        evf = fopen(evpath, "r");
+        if (evf) {
+            char line[512];
+            while (fgets(line, sizeof line, evf)) {
+                pr_msg m;
+                long ts = 0;
+                char kind = 'S';
+                char from[64] = "SYS";
+                char text[256] = "";
+
+                if (sscanf(line, "%ld\t%c\t%63[^\t]\t%255[^\n]",
+                           &ts, &kind, from, text) >= 4) {
+                    memset(&m, 0, sizeof m);
+                    m.kind = kind;
+                    m.ts = (long long)ts;
+                    pr_strlcpy(m.from, from, sizeof m.from);
+                    pr_strlcpy(m.text, text, sizeof m.text);
+                    char e2[128];
+                    (void)pr_log_append(cfg, &m, e2, sizeof e2);
+                }
+            }
+            fclose(evf);
+            /* Truncate after reading */
+            evf = fopen(evpath, "w");
+            if (evf) fclose(evf);
+        }
+    }
+
     a->rig.vtbl->get_state(&a->rig, &a->st);
     return 0;
 }
@@ -385,32 +423,6 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
     }
     pr_buf_add(out, "</select>\n  </div>\n");
 
-    pr_buf_add(out, "    <span class=\"chip\"><b>QRG</b> <span class=\"num\" id=\"s-freq\">");
-    pr_buf_addf(out, "%.3f MHz", st->freq_hz / 1000000.0);
-    pr_buf_add(out, "</span></span>\n");
-
-    /*
-     * Channel chip REMOVED 2026-10-08.
-     *
-     * Originally rendered only when the current frequency coincided
-     * with a CB band channel; that coupling still bought us the
-     * ï¿½Channel 21" surface on the topbar in the terminal area.
-     * The operator wants pure frequency display - "PRTERM zeigt den
-     * Kanal auch nicht mehr an, ... Danke!". The bandplan lookup
-     * remains in code (channel_of) and the JSON state field is still
-     * emitted for logs / scripts, but no UI element surfaces it.
-     */
-
-    pr_buf_addf(out, "    <span class=\"chip\"><b>%s</b> <span id=\"s-mode\">",
-                T(cfg, "Mode"));
-    pr_html_escape(out, pr_band_mode_name(st->mode));
-    pr_buf_add(out, "</span></span>\n");
-
-    pr_buf_addf(out,
-        "    <span class=\"chip %s\" id=\"s-duplex\">%s</span>\n",
-        st->duplex == PR_DUPLEX_FULL ? "is-duplex-full" : "is-duplex-half",
-        T(cfg, st->duplex == PR_DUPLEX_FULL ? "FULL-DUPLEX" : "HALF-DUPLEX"));
-
     pr_buf_add(out, "  </div>\n");
 
     /* Navigation */
@@ -440,6 +452,7 @@ static void render_topbar(pr_buf *out, const pr_config *cfg,
 static void render_terminal(pr_buf *out, const pr_config *cfg,
                             const pr_rig_state *st)
 {
+    (void)st;
     pr_buf_add(out, "<section class=\"view is-active\" data-view=\"terminal\">\n");
 
     /*
@@ -456,11 +469,6 @@ static void render_terminal(pr_buf *out, const pr_config *cfg,
 
     /* Control line */
     pr_buf_add(out, "<div id=\"flash\" class=\"note\" hidden></div>\n");
-
-    pr_buf_addf(out, "<div class=\"note\" id=\"duplexnote\">%s</div>\n",
-        T(cfg, st->duplex == PR_DUPLEX_FULL
-            ? "Full duplex — reception continues while transmitting."
-            : "Half duplex — no reception while transmitting."));
 
     /*
      * The send bar carries exactly what is needed to send: the message
@@ -575,9 +583,10 @@ static void render_mailbox(pr_buf *out, const pr_config *cfg)
 static void render_admin(pr_buf *out, const pr_config *cfg,
                          const pr_session *sess, const pr_rig_state *st)
 {
+    (void)st;
     pr_buf_add(out, "<section class=\"view\" data-view=\"admin\">\n");
 
-    if (!sess->valid) {
+    if (sess == NULL || !sess->valid) {
         pr_buf_addf(out,
             "<div class=\"card\"><h2 class=\"grad\">%s</h2>\n"
             "<p>%s "
@@ -665,13 +674,13 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
      * callerid, antenna, enabled. Each [station:NAME] block has its own form
      * and its own Save button. */
     for (size_t i = 0; i < cfg->nstations; i++) {
-        const pr_station *st = &cfg->stations[i];
+        const pr_station *sta = &cfg->stations[i];
         pr_buf_addf(out, "<form class=\"card station\" method=\"post\" action=\"\">"
                         "<h2 class=\"grad\">%s: %s</h2>\n",
-                    T(cfg, "Device"), st->name);
+                    T(cfg, "Device"), sta->name);
 
         html_input_hidden(out, "action", "save_station_radio");
-        html_input_hidden(out, "name", st->name);
+        html_input_hidden(out, "name", sta->name);
         html_csrf(out, sess);
 
         /* Driver dropdown */
@@ -686,29 +695,30 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
                 lbl[n]  = pr_trs(v->description);
                 n++;
             }
-            html_select(out, "driver", vals, lbl, n, st->rig_driver,
+            html_select(out, "driver", vals, lbl, n, sta->rig_driver,
                         T(cfg, "Driver"), "");
         }
-        html_input_text(out, "port", st->port, "/dev/ttyUSB0",
+        html_input_text(out, "port", sta->port, "/dev/ttyUSB0",
                         T(cfg, "Serial interface"),
                         "Linux: /dev/ttyUSB0, /dev/ttyACM0 - FreeBSD: /dev/cuaU0");
-        html_input_number(out, "baud", st->baud, 300, 4000000,
+        html_input_number(out, "baud", sta->baud, 300, 4000000,
                           T(cfg, "Baud rate"), "");
 
         /* KISS entry mode */
         {
-            const char *kv[] = { "esc", "auto", "tapr" };
+            const char *kv[] = { "esc", "auto", "tapr", "native" };
             const char *kl[] = {
                 "ESC @K (TheFirmware TNC2)",
                 "AUTO (retry when firmware echoes)",
-                "TAPR \"kiss on\""
+                "TAPR \"kiss on\"",
+                "NATIVE (KISS PTY / BayCom)"
             };
-            html_select(out, "kiss_init", kv, kl, 3, st->kiss_init,
+            html_select(out, "kiss_init", kv, kl, 4, sta->kiss_init,
                         T(cfg, "KISS entry"), "");
         }
-        html_input_text(out, "modem", st->modem, "tcm3105",
+        html_input_text(out, "modem", sta->modem, "tcm3105",
                         T(cfg, "Modem"), "tcm3105, afsk, ...");
-        html_input_text(out, "serial_line", st->serial_line, "8n1",
+        html_input_text(out, "serial_line", sta->serial_line, "8n1",
                         T(cfg, "Serial line"), "8n1, 7e1, 8n2, ...");
 
         /*
@@ -719,8 +729,8 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
          */
         {
             char fstr[16];
-            if (st->freq_hz > 0)
-                snprintf(fstr, sizeof fstr, "%ld", st->freq_hz);
+            if (sta->freq_hz > 0)
+                snprintf(fstr, sizeof fstr, "%ld", sta->freq_hz);
             else
                 snprintf(fstr, sizeof fstr, "%s", "");
             html_input_text(out, "freq_hz", fstr, "",
@@ -737,22 +747,22 @@ static void render_admin(pr_buf *out, const pr_config *cfg,
             };
             char current[8];
             snprintf(current, sizeof current, "%s",
-                     st->mode == 0u ? "inherit" : pr_band_mode_name(st->mode));
+                     sta->mode == 0u ? "inherit" : pr_band_mode_name(sta->mode));
             html_select(out, "mode", mv, ml, 4, current,
                         T(cfg, "Mode"),
                         T(cfg, "FM/AM/SSB - inherit falls back to [radio] mode"));
         }
 
-        html_input_text(out, "callerid", st->callerid, "DL1ABC-1",
+        html_input_text(out, "callerid", sta->callerid, "DL1ABC-1",
                         T(cfg, "CALLERID"), "");
-        html_input_text(out, "antenna", st->antenna, "",
+        html_input_text(out, "antenna", sta->antenna, "",
                         T(cfg, "Antenna"), "");
-        html_checkbox(out, "enabled", st->enabled,
+        html_checkbox(out, "enabled", sta->enabled,
                       T(cfg, "Enabled"), "");
 
-        if (st->radio_baud != 0) {
+        if (sta->radio_baud != 0) {
             char rbaud[32];
-            snprintf(rbaud, sizeof rbaud, "%ld", st->radio_baud);
+            snprintf(rbaud, sizeof rbaud, "%ld", sta->radio_baud);
             pr_buf_addf(out, "<p class=\"hint\">%s: <b>%s</b> %s</p>\n",
                         T(cfg, "Radio baud (hardware)"), rbaud,
                         T(cfg, "- fixed, not changeable"));
@@ -1167,6 +1177,17 @@ static void json_state(pr_response *res, const app *a, const pr_config *cfg,
         long long free = (last > 0) ? (now - last) : 999;
         json_kv_int(b, "band_free_s", (int)free);
     }
+    /* Typewriter speed: delay per character in ms.
+     * 0 = auto → derives from radio_baud (2400→40ms, 1200→80ms, 19200→5ms).
+     * >0 = fixed baud → same formula. */
+    {
+        long tw_baud = cfg->typewriter_baud > 0
+            ? (long)cfg->typewriter_baud : cfg->radio_baud;
+        if (tw_baud <= 0) tw_baud = 2400;
+        int tw_ms = (int)(96000L / tw_baud);
+        if (tw_ms < 2) tw_ms = 2;
+        json_kv_int(b, "typewriter_ms", tw_ms);
+    }
     /* Reason why the rig did not come up - without it the problem
      * stays invisible: the page renders, but nothing works. */
     if (!rig_started && a->err[0] != '\0')
@@ -1571,9 +1592,9 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             if (silent < 150) {
                 long remaining = 150 - (long)silent;
                 char msg_buf[256];
-                snprintf(msg_buf, sizeof msg_buf,
-                         pr_tr(cfg->language, "channel not clear — wait %ld s (need 150 s silence)"),
-                         remaining);
+                pr_trf(msg_buf, sizeof msg_buf,
+                       "channel not clear — wait %ld s (need 150 s silence)",
+                       remaining);
                 json_err(res, msg_buf);
                 app_stop(&a);
                 return 0;
@@ -1809,9 +1830,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
     /* ---- State as JSON    -------------------------------------------- */
     if (action != NULL && strcmp(action, "state") == 0) {
-        size_t want = (size_t)atoi(pr_req_get(req, "rows") != NULL
-                                   ? pr_req_get(req, "rows") : "0");
-        (void)want;
+        /* Messages filtered by rows param */
         /* new messages since the last poll would be better, but a
          * short window is enough for the display */
         /*

@@ -31,7 +31,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PRTERM_VERSION "0.1.0"
+#define PRTERM_VERSION "0.8.5"
 
 /* ======================================================================= */
 /* Find the configuration file                                               */

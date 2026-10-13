@@ -8,13 +8,13 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "prterm_compat.h"
 #include "mailboxdsock.h"
 #include "util.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <stdio.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +26,8 @@
 /* ---------------------------------------------------------------------- */
 /* Low-level helpers                                                     */
 /* ---------------------------------------------------------------------- */
+
+static int set_err(char *err, size_t errlen, const char *fmt, ...) PR_FMT_PRINTF(3, 4);
 
 static int set_err(char *err, size_t errlen, const char *fmt, ...)
 {

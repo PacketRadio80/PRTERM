@@ -310,6 +310,8 @@ bool pr_probe_has_banner(const unsigned char *buf, size_t len)
     return false;
 }
 
+static void say(pr_probe_cb cb, void *ud, const char *fmt, ...) PR_FMT_PRINTF(3, 4);
+
 static void say(pr_probe_cb cb, void *ud, const char *fmt, ...)
 {
     if (cb == NULL)

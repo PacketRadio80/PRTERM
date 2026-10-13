@@ -184,10 +184,10 @@ static void sanitize(char *dst, size_t dstlen, const char *src)
 {
     size_t w = 0;
     for (const char *p = src; *p != '\0' && w + 1 < dstlen; p++) {
-        char c = *p;
-        if (c == '\t' || c == '\r' || c == '\n')
+        unsigned char c = (unsigned char)*p;
+        if (c < 0x20 || c == 0x7f)
             c = ' ';
-        dst[w++] = c;
+        dst[w++] = (char)c;
     }
     dst[w] = '\0';
 }
@@ -216,6 +216,11 @@ static void parse_line(pr_msg *m, char *line)
     *f = '\0'; m->db = atoi(p); p = f + 1;
 
     pr_strlcpy(m->text, p, sizeof m->text);
+
+    /* Strip trailing newline from log line */
+    size_t tlen = strlen(m->text);
+    while (tlen > 0 && (m->text[tlen-1] == '\n' || m->text[tlen-1] == '\r'))
+        m->text[--tlen] = '\0';
 }
 
 static size_t count_lines(const char *path)

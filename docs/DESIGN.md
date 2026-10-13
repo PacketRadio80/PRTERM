@@ -57,11 +57,15 @@ Portability rules:
 | -------- | ------------------------------------ | ---------------------- | --------- |
 | `sim`    | —                                    | Simulation             | active path |
 | `tnc2`   | Landolt TNC2C, PK-TNC2 (TheFirmware TNC-2 class) | KISS + ESC host mode   | in use    |
+| `tnc2` (`native`) | BayCom/Compa/PC-COM SER12 via `prterm-baycom` | KISS over PTY  | in use    |
 | `tmodem` | T-Modem (half-TNC)                   | ESC host frames        | planned   |
 
-**Not supported today:** Baycom and ARDOP. Baycom will be studied and built into
-PRTERM later; ARDOP comes later still, and only as an external plugin that talks
-to ARDOP software — no integration.
+**Supported:** Baycom-class SER12 modems (PC-COM, Compa, TFPCX) run through the
+standalone `prterm-baycom` daemon — see [`BAYCOM.md`](BAYCOM.md) and the README
+for the continuous-carrier (PTT/TOT/watchdog/CSMA) protection.
+
+**Not supported today:** ARDOP. It comes later, and only as an external plugin
+that talks to ARDOP software — no integration.
 
 **Out of scope for good:** VARA and other sound-card modems.
 

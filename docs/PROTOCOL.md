@@ -234,7 +234,8 @@ Ban list               max 256 entries
 - `frequency_mhz = 27.235`, `radio_baud`, `radio_band = cb`, `radio_duplex`
 - Broadcast is **sequential**, ~60 s between links
 - The in-kernel `baycom_ser_fdx` path is **not used** — it freezes interactive
-  hosts, so Baycom stays a userspace concern. Baycom is on the PRTERM roadmap,
-  to be studied and built in later.
+  hosts. Baycom instead runs as the userspace `prterm-baycom` daemon, which
+  bit-bangs SER12 and exposes a KISS PTY (`kiss_init = native`); see
+  [`BAYCOM.md`](BAYCOM.md).
 - The references use **WebSocket + reverse proxy**; PRTERM deliberately uses
   **standard CGI with polling**, because "no installation" takes priority

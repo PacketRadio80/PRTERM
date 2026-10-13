@@ -117,6 +117,13 @@ static void tnc2_push_rx(tnc2_impl *t, const char *to, const char *from,
     /* Which device caught it - that is what "All" shows as origin. */
     pr_strlcpy(m->station, t->station, sizeof m->station);
     pr_strlcpy(m->text, text, sizeof m->text);
+
+    /* Sanitize: strip control characters from received text */
+    for (unsigned char *p = (unsigned char *)m->text; *p; p++)
+        if (*p < 0x20 || *p == 0x7f) *p = ' ';
+    /* Trim trailing spaces */
+    size_t tlen = strlen(m->text);
+    while (tlen > 0 && m->text[tlen-1] == ' ') m->text[--tlen] = '\0';
     m->db = db;
     m->ts = pr_now_s();
 }

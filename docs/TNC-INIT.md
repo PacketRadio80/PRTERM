@@ -42,6 +42,7 @@ Settle 2 s                           # important: do NOT close the port!
 | `pktnc2` | PK-TNC2                | **8N1** | 9600   | off     | `ESC @K` (auto)|
 | `tmodem` | T-Modem (half-TNC)     | 8N1     | 115200 | —       | native KISS    |
 | `generic`| classic TNC2 clones    | 8N1     | 2400   | off     | `kiss on\r`    |
+| `baycom` | BayCom/Compa/PC-COM SER12 modem via `prterm-baycom` | — | — | — | native KISS PTY |
 
 > **PK-TNC2 = TheFirmware TNC-2 class**, not TAPR: MAX25 runs the very
 > same ESC-based sequence on it (`pktnc2-boot-wait.sh` →
@@ -53,9 +54,11 @@ Settle 2 s                           # important: do NOT close the port!
 the Landolt TNC2C runs at **19200 8N1**. PRTERM makes the profile configurable
 and warns when opening with a deviating line format.
 
-> Baycom/PC-COM/SER12 are **not** supported by PRTERM: these boards
-> are bare modems, the host does HDLC + bit timing directly through the UART-
-> registers. That is its own device class and not a TNC.
+> Baycom/PC-COM/SER12 are supported via the dedicated `prterm-baycom` daemon
+> (`kiss_init = native`): these boards are bare modems, so the daemon does
+> HDLC + bit timing directly through the UART registers and exposes a KISS
+> PTY that `prterm-tncd` treats as a normal station. See
+> [`BAYCOM.md`](BAYCOM.md).
 
 ---
 

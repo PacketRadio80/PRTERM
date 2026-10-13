@@ -1,0 +1,132 @@
+# PRTERM Configuration Reference
+
+Complete configuration reference for **PRTERM 1.0.0**.
+Users copy needed sections into `prterm.ini`; missing keys use compiled-in defaults.
+
+## Sections
+
+### `[site]` — Station identity & UI language
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `name` | `PRTERM` | Station name (header bar) |
+| `subtitle` | *(empty)* | Subtitle; empty = hidden |
+| `language` | `en` | UI language: `en\|de\|es\|pt\|fr` |
+
+### `[station]` — Global station defaults (inherited by `[station:NAME]`)
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `callerid` | `PRTERM-1` | Callsign (6 chars + optional -N SSID) |
+| `qth` | *(empty)* | Location name (e.g. "MGH") |
+| `locator` | *(empty)* | Maidenhead grid (e.g. "JN49VL") |
+
+### `[ui]` — Web interface
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `font_file` | *(empty)* | .otf/.ttf path; empty = system mono |
+| `font_size` | `14` | CSS pixels (6-96) |
+| `line_height` | `1.2` | Multiplier (1.0-2.0) |
+| `density` | `compact` | `compact` \| `normal` |
+| `rows` | `0` | Terminal rows; 0 = auto |
+| `columns` | `0` | Terminal columns; 0 = auto |
+| `theme` | `silver` | `silver` \| `dark` |
+
+### `[radio]` — Global defaults only
+
+Device-specific settings (driver, port, baud, modem, line, kiss_init, freq_hz, mode) belong in `[station:NAME]` sections. These global keys are kept as fallback for backward compatibility.
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `duplex` | `half` | `full` \| `half` (RX during TX?) |
+| `tx_power_mw` | `4000` | TX power mW (0-12000) — compliance limit |
+| `rx_poll_ms` | `250` | RX poll interval ms (50-10000) |
+| `max_log` | `500` | Max log lines in UI (20-20000) |
+
+Legacy fallback keys (prefer `[station:NAME]` instead):
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `driver` | `sim` | `sim` \| `tnc2` \| `tmodem` |
+| `port` | `/dev/ttyUSB0` | Serial device to TNC |
+| `baud` | `115200` | Serial baud rate (300-4000000) |
+| `radio_baud` | `1200` | Channel baud: TNC2C=2400, PK-TNC2=1200 |
+| `modem` | *(empty)* | Modem type (e.g. "tcm3105") |
+| `line` | `8n1` | `8n1\|7e1\|7o1\|8e1\|8o1` |
+| `kiss_init` | `esc` | KISS entry: `esc\|auto\|tapr` |
+| `freq_hz` | `27125000` | Frequency in Hz |
+| `mode` | `am` | `fm\|am\|ssb\|lsb\|usb\|cw` |
+
+### `[admin]` — Web administration
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `enabled` | `true` | Admin area enabled? |
+| `user` | `admin` | Admin username |
+| `pass_hash` | *(empty)* | SHA256 hash; empty = built-in default "PRTerm" |
+| `session_ttl_min` | `480` | Session timeout minutes (1-10080) |
+| `allow_guest_tx` | `true` | Guest users may transmit? |
+
+### `[mailboxd]` — MailboxD BBS integration
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `enabled` | `false` | Show MailboxD tab and link? |
+| `dir` | `/var/mailboxd` | Install dir; socket at `<dir>/prterm.sock` |
+
+### `[daemon]` — TNC daemon (prterm-tncd)
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `resend_kiss_params` | `false` | Re-send KISS CSMA params after repair? |
+
+### `[debug]` — Logging
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `level` | `warn` | `off\|error\|warn\|info\|debug\|trace` |
+
+### `[callsign]` — Callsign validation rules
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `callid_max_len` | `6` | Max base-call length (1-10) |
+| `callerid_base_len` | `6` | CallerID base length (1-10) |
+| `callerid_max_total` | `8` | Total length incl. SSID (1-16) |
+| `callerid_allow_ssid` | `true` | Allow "-N" suffix? |
+| `callerid_ssid_digits` | `1` | SSID digits after '-' (0-2) |
+
+### `[ban]` — Banned callsigns
+
+Wildcard patterns (`*` = any, `?` = single char) mapping to reasons.
+
+### `[paths]` — Runtime directories
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `runtime_dir` | `./prterm.runtime` | Session/state dir (relative to CGI binary) |
+
+### `[station:NAME]` — Per-station TNC/rig configuration
+
+Each `[station:NAME]` defines one complete station: own TNC, own radio, own antenna. All device-specific settings live here.
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `driver` | `tnc2` | `sim` \| `tnc2` \| `tmodem` |
+| `port` | `/dev/ttyUSB0` | Serial device (use stable by-id path) |
+| `baud` | `19200` | Serial baud rate to TNC |
+| `radio_baud` | `1200` | On-air data rate (HARDWARE, not changeable) |
+| `modem` | *(empty)* | Modem type (e.g. "tcm3105") |
+| `line` | `8n1` | `8n1\|7e1\|7o1\|8e1\|8o1` |
+| `kiss_init` | `esc` | KISS entry: `esc` (TNC2C), `auto` (PK-TNC2), `tapr` (TAPR) |
+| `mode` | *(empty)* | `fm\|am\|ssb`; empty = inherit `[radio]` mode |
+| `freq_hz` | `0` | Frequency in Hz; 0 = inherit `[radio]` freq_hz |
+| `callerid` | *(inherits)* | Station callsign (inherits `[station]` if empty) |
+| `antenne` | *(empty)* | Antenna description (display only) |
+| `enabled` | `true` | Station active? |
+
+**KISS init modes:**
+- `esc` — `ESC @K` without `\r` (Landolt TNC2C, TheFirmware)
+- `auto` — `ESC @K`, repeated when firmware only echoes "kiss on" (PK-TNC2, TheFirmware class)
+- `tapr` — `"kiss on\r"` (real TAPR devices only)

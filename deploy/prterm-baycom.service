@@ -1,0 +1,35 @@
+# PRTERM BayCom/Compa SER12 modem daemon
+# Installed as: /etc/systemd/system/prterm-baycom.service
+#
+# Drives a TCM3105 AFSK modem via direct UART register access
+# (RTS = PTT, DTR = TX data bit, THR 0x00 = charge pump, CTS = RX).
+# Exposes a KISS PTY at <runtime_dir>/kiss-<tag> for prterm-tncd.
+#
+# NOTE: this needs a real 8250/16550 UART with I/O-port access
+# (/dev/ttyS0, iobase 0x3f8) — NOT a USB-serial adapter, which has
+# no reachable MSR/THR registers for bit-banging.
+#
+# Runs as ROOT — ioperm/inb/outb require elevated privileges.
+# Adjust device, iobase, baud and tag for your hardware.
+
+[Unit]
+Description=PRTERM BayCom/Compa SER12 modem daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/var/prterm/prterm-baycom \
+    -d /dev/ttyS0 \
+    -i 0x3f8 \
+    -b 1200 \
+    -t bc0 \
+    -s /var/prterm/prterm.runtime
+WorkingDirectory=/var/prterm
+User=root
+Restart=on-failure
+RestartSec=10
+# BayCom needs direct UART access — PrivateDevices would hide /dev/ttyS*
+PrivateDevices=no
+
+[Install]
+WantedBy=multi-user.target

@@ -64,6 +64,8 @@ static void show_readable(char *dst, size_t dstlen,
     dst[w] = '\0';
 }
 
+static void add(pr_selftest *st, const char *name, int status, const char *fmt, ...) PR_FMT_PRINTF(4, 5);
+
 static void add(pr_selftest *st, const char *name, int status, const char *fmt, ...)
 {
     if (st->n >= PR_SELFTEST_MAX)
@@ -453,7 +455,9 @@ int pr_checkup(const pr_config *cfg, pr_selftest *out)
     /* 5. Enter KISS - per profile       */
     {
         char e2[128];
-        if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
+        if (pr_str_eq_ci(cfg->kiss_init, "native")) {
+            add(out, "KISS entry", PR_TEST_PASS, "native (skipped)");
+        } else if (pr_str_eq_ci(cfg->kiss_init, "tapr")) {
             static const unsigned char kiss_on[] = {
                 'k','i','s','s',' ','o','n','\r'
             };

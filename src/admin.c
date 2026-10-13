@@ -45,6 +45,8 @@ static void json_err(pr_response *res, const char *msg)
     pr_buf_add(&res->body, "\"}");
 }
 
+static void json_err_fmt(pr_response *res, const char *fmt, ...) PR_FMT_PRINTF(2, 3);
+
 static void json_err_fmt(pr_response *res, const char *fmt, ...)
 {
     char buf[512];
@@ -132,7 +134,7 @@ static void act_save_station(pr_request *req, pr_response *res, pr_config *cfg)
  *   baud         — 300..4_000_000
  *   modem        — "tcm3105", "afsk", ...
  *   serial_line  — "8n1"
- *   kiss_init    — "esc" | "auto" | "tapr"
+ *   kiss_init    — "esc" | "auto" | "tapr" | "native"
  *   mode         — "fm" | "am" | "ssb" | "" (inherit the [radio] mode)
  *   freq_hz      — per-station frequency in Hz; 0/empty means inherit [radio]
  *   callerid     — per-device source callsign (validated if non-empty)
@@ -163,8 +165,9 @@ static void act_save_station_radio(pr_request *req, pr_response *res, pr_config 
         return;
     }
     const char *kiss = arg(req, "kiss_init");
-    if (strcmp(kiss, "esc") != 0 && strcmp(kiss, "auto") != 0 && strcmp(kiss, "tapr") != 0) {
-        json_err(res, pr_tr(cfg->language, "kiss_init must be \"esc\", \"auto\" or \"tapr\""));
+    if (strcmp(kiss, "esc") != 0 && strcmp(kiss, "auto") != 0 &&
+        strcmp(kiss, "tapr") != 0 && strcmp(kiss, "native") != 0) {
+        json_err(res, pr_tr(cfg->language, "kiss_init must be \"esc\", \"auto\", \"tapr\" or \"native\""));
         return;
     }
     const char *mode = arg(req, "mode");

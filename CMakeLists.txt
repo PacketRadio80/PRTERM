@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(prterm
-    VERSION 0.1.0
+    VERSION 0.8.5
     DESCRIPTION "PRTERM - CB & Amateurfunk Terminal (CGI)"
     LANGUAGES C)
 
@@ -52,11 +52,17 @@ if(PRTERM_WERROR)
 endif()
 
 # POSIX.1-2008 is the lower bound for Linux and FreeBSD. Also set in
-# every .c via src/prterm_compat.h so that a manually run compiler
+# every src/*.c via src/prterm_compat.h so that a manually run compiler
 # invocation works too.
 add_compile_definitions(_POSIX_C_SOURCE=200809L)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    add_compile_definitions(_DEFAULT_SOURCE=1)
+    add_compile_definitions(_GNU_SOURCE=1)
+else()
+    # BSD (FreeBSD): a strict _POSIX_C_SOURCE=200809L hides the XSI/BSD
+    # extensions we rely on - usleep(), random() (XSI) and cfmakeraw()
+    # (BSD-only). Enable them globally so src/, tools/ and tests/ all see
+    # the declarations without -Wimplicit-function-declaration noise.
+    add_compile_definitions(_XOPEN_SOURCE=700 _DEFAULT_SOURCE=1 __BSD_VISIBLE=1)
 endif()
 
 if(PRTERM_SANITIZE)
@@ -90,6 +96,44 @@ endfunction()
 
 prterm_embed_asset(prterm.css prterm_css PRTERM_CSS_SRC)
 prterm_embed_asset(prterm.js  prterm_js  PRTERM_JS_SRC)
+
+# Retro/alternative assets — same symbol names as modern (prterm_css, prterm_js)
+# so html.c works unchanged, but different source files.
+# The gen dir gets separate output files to avoid conflicts.
+set(_alter_css_out "${PRTERM_GEN_DIR}/embed_alter_prterm_css.c")
+set(_alter_js_out  "${PRTERM_GEN_DIR}/embed_alter_prterm_js.c")
+add_custom_command(
+    OUTPUT  "${_alter_css_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.css" "${_alter_css_out}" "prterm_css"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.css"
+    COMMENT "ASSET  web/prterm-alter.css -> prterm_css (alter)"
+    VERBATIM)
+add_custom_command(
+    OUTPUT  "${_alter_js_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.js" "${_alter_js_out}" "prterm_js"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-alter.js"
+    COMMENT "ASSET  web/prterm-alter.js -> prterm_js (alter)"
+    VERBATIM)
+set(PRTERM_ALTER_CSS_SRC "${_alter_css_out}")
+set(PRTERM_ALTER_JS_SRC  "${_alter_js_out}")
+
+# Text CGI assets — empty CSS/JS so html.c links
+set(_text_css_out "${PRTERM_GEN_DIR}/embed_text_prterm_css.c")
+set(_text_js_out  "${PRTERM_GEN_DIR}/embed_text_prterm_js.c")
+add_custom_command(
+    OUTPUT  "${_text_css_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-text.css" "${_text_css_out}" "prterm_css"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-text.css"
+    COMMENT "ASSET  web/prterm-text.css -> prterm_css (text)"
+    VERBATIM)
+add_custom_command(
+    OUTPUT  "${_text_js_out}"
+    COMMAND prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-text.js" "${_text_js_out}" "prterm_js"
+    DEPENDS prterm_embed "${CMAKE_CURRENT_SOURCE_DIR}/web/prterm-text.js"
+    COMMENT "ASSET  web/prterm-text.js -> prterm_js (text)"
+    VERBATIM)
+set(PRTERM_TEXT_CSS_SRC "${_text_css_out}")
+set(PRTERM_TEXT_JS_SRC  "${_text_js_out}")
 
 # ---------------------------------------------------------------------------
 # Core library (also linked by the tests)
@@ -155,6 +199,59 @@ target_compile_options(prterm PRIVATE ${PRTERM_WARN_FLAGS})
 set_target_properties(prterm PROPERTIES OUTPUT_NAME "prterm.cgi" PREFIX "")
 
 # ---------------------------------------------------------------------------
+# The retro/alternative CGI binary (prterm-alter.cgi)
+#
+# Same core as prterm.cgi but with a different page rendering layer
+# (pages_alter.c instead of pages.c) and retro web assets.
+# Works in text browsers (lynx, links, w3m) and on retro computers.
+# ---------------------------------------------------------------------------
+set(PRTERM_ALTER_CORE_SOURCES ${PRTERM_CORE_SOURCES})
+list(REMOVE_ITEM PRTERM_ALTER_CORE_SOURCES src/pages.c "${PRTERM_CSS_SRC}" "${PRTERM_JS_SRC}")
+list(APPEND PRTERM_ALTER_CORE_SOURCES src/pages_alter.c "${PRTERM_ALTER_CSS_SRC}" "${PRTERM_ALTER_JS_SRC}")
+
+add_library(prterm_alter_core STATIC ${PRTERM_ALTER_CORE_SOURCES})
+target_include_directories(prterm_alter_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_options(prterm_alter_core PRIVATE ${PRTERM_WARN_FLAGS})
+target_link_libraries(prterm_alter_core PUBLIC Threads::Threads)
+foreach(_def IN ITEMS
+        PRTERM_RIG_SIM=$<BOOL:${PRTERM_RIG_SIM}>
+        PRTERM_RIG_TNC2=$<BOOL:${PRTERM_RIG_TNC2}>
+        PRTERM_RIG_TMODEM=$<BOOL:${PRTERM_RIG_TMODEM}>)
+    target_compile_definitions(prterm_alter_core PRIVATE ${_def})
+endforeach()
+
+add_executable(prterm-alter src/main_alter.c)
+target_link_libraries(prterm-alter PRIVATE prterm_alter_core)
+target_compile_options(prterm-alter PRIVATE ${PRTERM_WARN_FLAGS})
+set_target_properties(prterm-alter PROPERTIES OUTPUT_NAME "prterm-alter.cgi" PREFIX "")
+
+# ---------------------------------------------------------------------------
+# The plain text CGI binary (prterm-text.cgi)
+#
+# Returns Content-Type: text/plain. No HTML, no CSS, no JS.
+# Works in any browser including text-only (lynx, links, w3m, curl).
+# ---------------------------------------------------------------------------
+set(PRTERM_TEXT_CORE_SOURCES ${PRTERM_CORE_SOURCES})
+list(REMOVE_ITEM PRTERM_TEXT_CORE_SOURCES src/pages.c "${PRTERM_CSS_SRC}" "${PRTERM_JS_SRC}")
+list(APPEND PRTERM_TEXT_CORE_SOURCES src/pages_text.c "${PRTERM_TEXT_CSS_SRC}" "${PRTERM_TEXT_JS_SRC}")
+
+add_library(prterm_text_core STATIC ${PRTERM_TEXT_CORE_SOURCES})
+target_include_directories(prterm_text_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_compile_options(prterm_text_core PRIVATE ${PRTERM_WARN_FLAGS})
+target_link_libraries(prterm_text_core PUBLIC Threads::Threads)
+foreach(_def IN ITEMS
+        PRTERM_RIG_SIM=$<BOOL:${PRTERM_RIG_SIM}>
+        PRTERM_RIG_TNC2=$<BOOL:${PRTERM_RIG_TNC2}>
+        PRTERM_RIG_TMODEM=$<BOOL:${PRTERM_RIG_TMODEM}>)
+    target_compile_definitions(prterm_text_core PRIVATE ${_def})
+endforeach()
+
+add_executable(prterm-text src/main_text.c)
+target_link_libraries(prterm-text PRIVATE prterm_text_core)
+target_compile_options(prterm-text PRIVATE ${PRTERM_WARN_FLAGS})
+set_target_properties(prterm-text PROPERTIES OUTPUT_NAME "prterm-text.cgi" PREFIX "")
+
+# ---------------------------------------------------------------------------
 # The device daemon - keeps the serial ports open and holds KISS
 #
 # A CGI process ends after every request. When the last file descriptor
@@ -176,6 +273,31 @@ if(PRTERM_BUILD_TOOLS)
     add_executable(prterm-probe tools/tnc_probe.c)
     target_link_libraries(prterm-probe PRIVATE prterm_core)
     target_compile_options(prterm-probe PRIVATE ${PRTERM_WARN_FLAGS})
+
+    add_executable(prterm-baycom tools/prterm-baycom.c)
+    target_compile_options(prterm-baycom PRIVATE -Wall -Wextra -O2)
+    find_package(Threads REQUIRED)
+    target_link_libraries(prterm-baycom PRIVATE Threads::Threads)
+    # openpty(): libutil on FreeBSD/glibc; on Linux also in -lutil.
+    include(CheckLibraryExists)
+    check_library_exists(util openpty "" HAVE_LIBUTIL)
+    if(HAVE_LIBUTIL)
+        target_link_libraries(prterm-baycom PRIVATE util)
+    endif()
+
+    add_executable(baycom_rx_check tools/baycom_rx_check.c)
+    target_compile_options(baycom_rx_check PRIVATE -Wall -Wextra -O2)
+    add_executable(baycom_rx_detect tools/baycom_rx_detect.c)
+    target_compile_options(baycom_rx_detect PRIVATE -Wall -Wextra -O2)
+
+    # Offline algorithm test for the BayCom SER12 core (no UART, no root).
+    # Pulls tools/prterm-baycom.c in via #include; the runtime half is
+    # compiled out, so -Wno-unused-function is expected there.
+    add_executable(test_baycom_offline tests/test_baycom_offline.c)
+    target_compile_options(test_baycom_offline PRIVATE
+                           -Wall -Wextra -O2 -Wno-unused-function)
+    target_link_libraries(test_baycom_offline PRIVATE Threads::Threads)
+    add_test(NAME baycom_offline COMMAND test_baycom_offline)
 endif()
 
 # ---------------------------------------------------------------------------

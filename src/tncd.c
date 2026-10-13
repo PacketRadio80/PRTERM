@@ -673,6 +673,23 @@ static bool ensure_kiss(tncd_station *st, bool force, char *err, size_t errlen)
     if (st->kiss_active && !force)
         return true;
 
+    /*
+     * "native" kiss_init: the device is already in KISS mode
+     * (e.g. BayCom PTY from prterm-baycom). No terminal probe,
+     * no MYCALL, no KISS entry, no KISS params — just go.
+     */
+    if (pr_str_eq_ci(st->cfg.kiss_init, "native")) {
+        st->kiss_active = true;
+        st->kiss_first_entry = true;
+        st->last_repair = time(NULL);
+        pr_strlcpy(st->detail, "KISS held (native)", sizeof st->detail);
+        pr_trace(PR_TR_INFO, "%s: KISS held (native mode, no entry needed)",
+                 st->name);
+        if (err != NULL)
+            err[0] = '\0';
+        return true;
+    }
+
     pr_trace(PR_TR_INFO, "%s: ensure_kiss (%s, KISS was %s)", st->name,
              force ? "forced" : "repair",
              st->kiss_active ? "held" : "lost");
@@ -789,8 +806,13 @@ static void station_pump(tncd_station *st)
      * only. A firmware banner means it rebooted or was reset - from
      * then on every byte written would be a transmission. The repair
      * is started by the watch or before the next frame.
+     *
+     * Native KISS PTY devices (BayCom) never speak terminal banners —
+     * the data is KISS frames from the modem, skip the check.
      */
-    if (st->kiss_active && pr_probe_has_banner(buf, (size_t)n)) {
+    if (st->kiss_active &&
+        !pr_str_eq_ci(st->cfg.kiss_init, "native") &&
+        pr_probe_has_banner(buf, (size_t)n)) {
         st->kiss_active = false;
         pr_strlcpy(st->detail, "device left KISS", sizeof st->detail);
         pr_trace(PR_TR_WARN,
@@ -823,6 +845,8 @@ static void tx_pace(tncd_station *st)
 /* Commands                                                                */
 /* ======================================================================= */
 
+static void answer(int fd, const char *fmt, ...) PR_FMT_PRINTF(2, 3);
+
 static void answer(int fd, const char *fmt, ...)
 {
     char line[PR_TNCSOCK_MAX_LINE];
@@ -849,6 +873,11 @@ static void post_tx_check(tncd_station *st)
 {
     unsigned char buf[512];
     char e2[128];
+
+    /* Native KISS PTY devices (BayCom) never speak terminal — skip check */
+    if (pr_str_eq_ci(st->cfg.kiss_init, "native"))
+        return;
+
     long n = pr_serial_read_quiet(&st->ser, buf, sizeof buf, 250, 120,
                                   e2, sizeof e2);
     if (n <= 0) {
@@ -1090,10 +1119,35 @@ static void station_watch(tncd_station *st)
     char err[256];
     pr_trace(PR_TR_INFO, "%s: watch - KISS lost (%s), repairing",
              st->name, st->detail);
-    if (ensure_kiss(st, true, err, sizeof err))
+    if (ensure_kiss(st, true, err, sizeof err)) {
         printf("  %-10s repaired - %s\n", st->name, st->detail);
-    else
+        /* Write event file for CGI to pick up */
+        {
+            char path[512];
+            FILE *f;
+            snprintf(path, sizeof path, "%s/tnc-events", st->cfg.runtime_dir);
+            f = fopen(path, "a");
+            if (f) {
+                fprintf(f, "%ld\tS\tSYS\tTNC %s repaired (%s)\n",
+                        (long)now, st->name, st->detail);
+                fclose(f);
+            }
+        }
+    } else {
         printf("  %-10s repair failed - %.120s\n", st->name, err);
+        /* Write event file for CGI to pick up */
+        {
+            char path[512];
+            FILE *f;
+            snprintf(path, sizeof path, "%s/tnc-events", st->cfg.runtime_dir);
+            f = fopen(path, "a");
+            if (f) {
+                fprintf(f, "%ld\tE\tSYS\tTNC %s repair failed: %.120s\n",
+                        (long)now, st->name, err);
+                fclose(f);
+            }
+        }
+    }
     fflush(stdout);
 }
 
