@@ -9,7 +9,7 @@ packet radio hardware and software, on the amateur and citizen bands. It is
 extensible through plugins for more features, and it is usable remotely from a
 browser.
 
-> **Status: development version (0.8.5)**
+> **Status: development version (0.9.0)**
 
 ---
 
