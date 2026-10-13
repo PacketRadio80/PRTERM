@@ -1089,10 +1089,21 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 app_stop(&a);
                 return 0;
             }
+
+            /* Per-station band-free check. */
+            const pr_station *sta = pr_config_default_station(cfg);
             long long now = pr_now_s();
+            long long last_tx = 0;
+            char txpath[512];
+            snprintf(txpath, sizeof txpath, "%s/last_tx_%s.ts",
+                     cfg->runtime_dir, sta ? sta->name : "default");
+            FILE *txf = fopen(txpath, "r");
+            if (txf) { fscanf(txf, "%lld", &last_tx); fclose(txf); }
+
             long long last = a.st.last_rx_ts;
-            if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
+            if (last_tx > last) last = last_tx;
             long long silent = (last > 0) ? (now - last) : 999;
+
             if (silent < 150) {
                 long remaining = 150 - (long)silent;
                 char msg_buf[256];
@@ -1105,6 +1116,8 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             }
             char err[256];
             if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
+                txf = fopen(txpath, "w");
+                if (txf) { fprintf(txf, "%lld\n", now); fclose(txf); }
                 json_ok(res);
             } else {
                 json_err(res, err);

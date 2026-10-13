@@ -1613,7 +1613,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         /* ---- MailboxD CQ beacon cycle ------------------------------------
          *
-         * action=mbox_cqbeacon&callerid=MGHBX1&msg=MGHBX1+%3D+online&station=bc0
+         * action=mbox_cqbeacon&callerid=CALLERID&msg=CALLERID+%3D+online&station=bc0
          *
          * Single-station CQ beacon.  The active station is already bound
          * by pr_config_apply_station (from the `station=NAME` request
@@ -1641,9 +1641,20 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
 
+            /* Per-station band-free check.  Each station writes its
+             * last TX timestamp to a file so subsequent beacon calls
+             * (possibly for other stations) see independent timers. */
             long long now = pr_now_s();
+            long long last_tx = 0;
+            char txpath[512];
+            snprintf(txpath, sizeof txpath, "%s/last_tx_%s.ts",
+                     cfg->runtime_dir, station->name);
+            FILE *txf = fopen(txpath, "r");
+            if (txf) { fscanf(txf, "%lld", &last_tx); fclose(txf); }
+
+            /* Also consider RX activity on this channel. */
             long long last = a.st.last_rx_ts;
-            if (a.st.last_tx_ts > last) last = a.st.last_tx_ts;
+            if (last_tx > last) last = last_tx;
             long long silent = (last > 0) ? (now - last) : 999;
 
             if (silent < 150) {
@@ -1659,6 +1670,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
             char err[256];
             if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
+                /* Record per-station TX timestamp. */
+                txf = fopen(txpath, "w");
+                if (txf) { fprintf(txf, "%lld\n", now); fclose(txf); }
+
                 pr_response_json(res, 200);
                 pr_buf_add(&res->body, "{\"ok\":true,\"device\":\"");
                 pr_json_escape(&res->body, station->name);
@@ -1672,7 +1687,7 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
 
         /* ---- MailboxD RX poll --------------------------------------------
          *
-         * action=mbox_rxpoll&callerid=MGHBX1&since=<epoch>
+         * action=mbox_rxpoll&callerid=CALLERID&since=<epoch>
          *
          * Connects directly to each station's tncd daemon socket,
          * reads the latest received KISS frame, decodes the AX.25
