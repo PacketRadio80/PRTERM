@@ -318,6 +318,11 @@ finds `kiss-<tag>`. Start `prterm-baycom` **before** `prterm-tncd`: the PTY
 symlink must exist when the daemon opens the station. A Linux systemd unit
 is provided in `deploy/prterm-baycom.service`.
 
+`prterm-baycom` is the **only** PRTERM component that runs as root
+(register-level I/O — see above). `prterm-tncd` and the CGIs stay
+unprivileged and run as the web server user; the user/group model is in
+[DESIGN.md §8](DESIGN.md).
+
 ## Sources
 
 - `0-POOL/study/MAX25-Stack/stacks/max25-bcpr/` — SER12 userspace port

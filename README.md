@@ -34,6 +34,10 @@ browser.
 
 ## Quick start
 
+> **New here?** The copy-and-paste setup guide for Raspberry Pi OS and
+> FreeBSD (lighttpd, first transmission) is
+> [`docs/QUICK-GUIDE.md`](docs/QUICK-GUIDE.md).
+
 ### Build
 
 ```sh
@@ -314,6 +318,11 @@ and keeps both alive. One Unix socket per station:
 
 It stays in the foreground; for permanent operation systemd starts it
 (`docs/lighttpd-systemd.conf` shows the pattern).
+
+Run `prterm-tncd` **as the same user as the web server** (the CGI's
+user) and make sure that user is in the serial-port group (`dialer` on
+FreeBSD, `dialout` on Debian/Ubuntu — check `ls -l /dev/<port>`). Only
+`prterm-baycom` runs as root. Full model: [DESIGN.md §8](docs/DESIGN.md).
 
 ### Multiple stations
 

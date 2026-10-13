@@ -83,6 +83,17 @@ out-of-band tests only.
   `www-data`; lighttpd: `lighttpd`; NGinx + fcgiwrap: the user running
   fcgiwrap, default `www-data`; busybox: the user passed to `-u`).
 
+### Users and groups
+
+The CGI and `prterm-tncd` run as **the same user** (the web server's),
+and that user must be a member of the group owning the serial devices.
+The group differs by OS/distribution — `dialer` on FreeBSD, `dialout` on
+Debian/Ubuntu, `uucp` on Arch/Gentoo; check with `ls -l /dev/<port>` and
+add the web server user (`pw groupmod dialer -m lighttpd` /
+`usermod -aG dialout lighttpd`), then restart `prterm-tncd`.
+`prterm-baycom` is the only component that runs as root (UART register
+access). Full model: [DESIGN.md §8](DESIGN.md).
+
 ## Featured Deploy (lighttpd, current reference)
 
 The `deploy/10-prterm.conf` shipped with the source corresponds to:

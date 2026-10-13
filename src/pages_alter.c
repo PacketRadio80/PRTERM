@@ -23,6 +23,7 @@
 #include "tncsock.h"
 #include "mailboxdsock.h"
 #include "state.h"
+#include "trace.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -1031,17 +1032,27 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         /* ---- MailboxD RF broadcast ------------------------------------ */
         if (action != NULL && strcmp(action, "mbox_broadcast") == 0) {
             const char *msg = pr_req_param(req, "msg");
+            pr_trace(PR_TR_DEBUG,
+                     "event=mbox_broadcast in callerid=%s msg='%.60s'",
+                     cfg->callerid, msg ? msg : "");
             if (msg == NULL || msg[0] == '\0') {
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_broadcast result=error reason=msg_empty");
                 json_err(res, T(cfg, "broadcast message is empty"));
                 app_stop(&a);
                 return 0;
             }
             if (!rig_started) {
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_broadcast result=error reason=no_rig err='%s'",
+                         a.err);
                 json_err(res, a.err[0] ? a.err : T(cfg, "no rig connected"));
                 app_stop(&a);
                 return 0;
             }
             if (a.st.monitor) {
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_broadcast result=error reason=monitor_lock");
                 json_err(res, T(cfg, "monitor mode: transmitting is locked"));
                 app_stop(&a);
                 return 0;
@@ -1050,20 +1061,34 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             long long last_activity = a.st.last_rx_ts;
             if (a.st.last_tx_ts > last_activity) last_activity = a.st.last_tx_ts;
             long long silent = (last_activity > 0) ? (now - last_activity) : 999;
+            pr_trace(PR_TR_DEBUG,
+                     "event=mbox_broadcast band_free now=%lld last_rx=%lld "
+                     "last_tx=%lld silent=%lld need=150",
+                     now, a.st.last_rx_ts, a.st.last_tx_ts, silent);
             if (silent < 150) {
                 long remaining = 150 - (long)silent;
                 char msg_buf[256];
                 pr_trf(msg_buf, sizeof msg_buf,
                        "channel not clear — wait %ld s (need 150 s silence)",
                        remaining);
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_broadcast result=skip reason=channel_busy "
+                         "silent=%lld wait_s=%ld",
+                         silent, remaining);
                 json_err(res, msg_buf);
                 app_stop(&a);
                 return 0;
             }
             char err[256];
             if (app_tx(&a, cfg->callerid, "", msg, &sess, err, sizeof err) != 0) {
+                pr_trace(PR_TR_ERROR,
+                         "event=mbox_broadcast result=error reason=tx_failed err='%s'",
+                         err);
                 json_err(res, err);
             } else {
+                pr_trace(PR_TR_INFO,
+                         "event=mbox_broadcast result=ok from=%s msg='%.60s'",
+                         cfg->callerid, msg);
                 json_ok(res);
             }
             app_stop(&a);
@@ -1074,6 +1099,10 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         if (action != NULL && strcmp(action, "mbox_cqbeacon") == 0) {
             const char *cid = pr_req_param(req, "callerid");
             const char *msg = pr_req_param(req, "msg");
+            const pr_station *sta = pr_config_default_station(cfg);
+            pr_trace(PR_TR_DEBUG,
+                     "event=mbox_cqbeacon in callerid=%s station=%s msg='%.60s'",
+                     cid ? cid : "", sta ? sta->name : "", msg ? msg : "");
             if (cid == NULL || cid[0] == '\0') {
                 json_err(res, T(cfg, "callerid is required"));
                 app_stop(&a);
@@ -1085,13 +1114,16 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
             if (!rig_started) {
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_cqbeacon station=%s result=error "
+                         "reason=no_rig err='%s'",
+                         sta ? sta->name : "", a.err);
                 json_err(res, a.err[0] ? a.err : T(cfg, "no rig connected"));
                 app_stop(&a);
                 return 0;
             }
 
             /* Per-station band-free check. */
-            const pr_station *sta = pr_config_default_station(cfg);
             long long now = pr_now_s();
             long long last_tx = 0;
             char txpath[512];
@@ -1104,12 +1136,22 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             if (last_tx > last) last = last_tx;
             long long silent = (last > 0) ? (now - last) : 999;
 
+            pr_trace(PR_TR_DEBUG,
+                     "event=mbox_cqbeacon station=%s band_free now=%lld "
+                     "last_rx=%lld last_tx_file=%lld silent=%lld need=150",
+                     sta ? sta->name : "default", now, a.st.last_rx_ts,
+                     last_tx, silent);
+
             if (silent < 150) {
                 long remaining = 150 - (long)silent;
                 char msg_buf[256];
                 snprintf(msg_buf, sizeof msg_buf,
                          T(cfg, "channel not clear — wait %ld s (need 150 s silence)"),
                          remaining);
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_cqbeacon station=%s result=skip "
+                         "reason=channel_busy silent=%lld wait_s=%ld",
+                         sta ? sta->name : "default", silent, remaining);
                 json_err(res, msg_buf);
                 app_stop(&a);
                 return 0;
@@ -1124,8 +1166,16 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             if (app_tx(&a, cid_sta, "CQ", msg, &sess, err, sizeof err) == 0) {
                 txf = fopen(txpath, "w");
                 if (txf) { fprintf(txf, "%lld\n", now); fclose(txf); }
+                pr_trace(PR_TR_INFO,
+                         "event=mbox_cqbeacon station=%s result=ok label=%s "
+                         "msg='%.60s'",
+                         sta ? sta->name : "default", cid_sta, msg);
                 json_ok(res);
             } else {
+                pr_trace(PR_TR_ERROR,
+                         "event=mbox_cqbeacon station=%s result=error "
+                         "reason=tx_failed err='%s'",
+                         sta ? sta->name : "default", err);
                 json_err(res, err);
             }
             app_stop(&a);
@@ -1135,7 +1185,11 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
         /* ---- MailboxD RX poll ----------------------------------------- */
         if (action != NULL && strcmp(action, "mbox_rxpoll") == 0) {
             const char *cid = pr_req_param(req, "callerid");
+            pr_trace(PR_TR_DEBUG, "event=mbox_rxpoll in callerid=%s",
+                     cid ? cid : "");
             if (cid == NULL || cid[0] == '\0') {
+                pr_trace(PR_TR_WARN,
+                         "event=mbox_rxpoll result=error reason=callerid_missing");
                 json_err(res, T(cfg, "callerid is required"));
                 app_stop(&a);
                 return 0;
@@ -1209,8 +1263,13 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                             "\"text\":\"%s\",\"station\":\"%s\",\"ts\":%lld}",
                             from, to, text, sta->name, now_ts);
                 nout++;
+                pr_trace(PR_TR_DEBUG,
+                         "event=mbox_rxpoll frame from=%s to=%s station=%s "
+                         "text='%.60s'",
+                         from, to, sta->name, text);
             }
             pr_buf_add(&res->body, "]}");
+            pr_trace(PR_TR_INFO, "event=mbox_rxpoll result=ok frames=%d", nout);
             app_stop(&a);
             return 0;
         }

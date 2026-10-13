@@ -155,3 +155,77 @@ ctest --test-dir build --output-on-failure
 ```
 
 Final product: `build/prterm.cgi` (one file) + `prterm.ini`.
+
+## 8. Users, groups and privileges
+
+PRTERM has three runtime identities. Most "socket/permission denied"
+problems are really user-setup problems — this section is the whole
+model.
+
+### Rule 1: CGI and prterm-tncd run as the same user
+
+`prterm.cgi` (and the `-alter` / `-text` variants) and `prterm-tncd`
+should run as **the same operating-system user** — normally the web
+server user (`lighttpd`, `www`, `www-data`, `apache`, or the user given
+to busybox httpd `-u`). Both sides share `[runtime] runtime_dir`:
+
+- `tnc-<station>.sock` — created by `prterm-tncd`, connected to by the CGI
+- `lock`, `last_tx_<station>.ts` — written by the CGI
+- `kiss-<tag>` — PTY symlink from `prterm-baycom`, opened by `prterm-tncd`
+
+With one uid all of this works with no `chmod`, no umask tricks and no
+group wrangling. So the web server user is the one that starts
+`prterm-tncd` (systemd `User=`, rc.d as that user, or `sudo -u
+<webserver-user> ...`).
+
+Two different users are technically possible (shared group owning the
+runtime dir and every socket) but that is extra configuration for no
+benefit — avoid it.
+
+### Rule 2: the user needs the serial-port group
+
+Serial device nodes are owned by a system group that differs per
+OS/distribution. The user running `prterm-tncd` must be a member of that
+group, otherwise `open()` on the port fails with "permission denied":
+
+| OS / distribution | Device node          | Group              |
+| ----------------- | -------------------- | ------------------ |
+| FreeBSD           | `/dev/cuau*`, `/dev/ttyU*` | `dialer` (660) |
+| Debian / Ubuntu   | `/dev/ttyS*`, `/dev/ttyUSB*` | `dialout`  |
+| Arch / Gentoo     | same nodes           | `uucp`             |
+| others            | `ls -l /dev/<port>` shows it | often `tty` or `dialout` |
+
+Check with `ls -l /dev/<port>`, then add the user to the owning group:
+
+```sh
+pw groupmod dialer -m lighttpd      # FreeBSD
+usermod -aG dialout lighttpd        # Linux
+```
+
+Group membership is picked up at process start — restart `prterm-tncd`
+after changing groups.
+
+### Rule 3: prterm-baycom runs as root
+
+`prterm-baycom` is the single exception: it bit-bangs the SER12 waveform
+directly in the UART registers, which needs I/O-port privileges
+(`/dev/io` on FreeBSD, `ioperm(2)` on Linux) and `SCHED_FIFO`. There is
+no unprivileged way to touch UART registers, so this daemon **must** run
+as **root**.
+
+Keep the blast radius small: only `prterm-baycom` is root. It hands the
+modem to `prterm-tncd` as a KISS PTY (`kiss-<tag>`), so the rest of the
+stack stays unprivileged. The `baycom_rx_*` diagnostic tools need root
+for the same reason.
+
+### Summary
+
+| Component                      | User                    | Why |
+| ------------------------------ | ----------------------- | --- |
+| `prterm.cgi` / `-alter` / `-text` | web server user      | served by the web server |
+| `prterm-tncd`                  | **same** web server user | shared runtime dir/sockets (Rule 1), serial group member (Rule 2) |
+| `prterm-baycom`                | root                    | direct UART register access (Rule 3) |
+| `prterm-ini`, `prterm-probe`   | the same user as above  | they read/write `prterm.ini` + runtime state |
+
+Never run the CGI or `prterm-tncd` as root: the web-facing parts must
+not hold privileges. Only the register-level modem daemon does.
