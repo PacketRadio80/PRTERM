@@ -47,6 +47,7 @@
 #include "config.h"
 #include "kiss.h"
 #include "radio.h"
+#include "state.h"
 #include "tncsock.h"
 #include "util.h"
 #include "testutil.h"
@@ -375,6 +376,44 @@ static void run_scenario(const char *daemon, const char *tag,
                     CHECK(rec != NULL && memfind(rec, rlen,
                                                  (const char *)frame3,
                                                  flen3) != NULL);
+                }
+
+                /* A source labelled "CALL@device" names the device in
+                 * the message log (which station carried the beacon) -
+                 * the frame on the air keeps the plain base call. */
+                {
+                    char label[64];
+                    snprintf(label, sizeof label, "%s@%s", callerid, tag);
+                    CHECK(rig.vtbl->send(&rig, label, "CQ", "moin3",
+                                         err, sizeof err) == 0);
+
+                    unsigned char ui5[64];
+                    size_t uilen5 = ax25_ui_frame(ui5, sizeof ui5, callerid,
+                                                  "CQ",
+                                                  (const unsigned char *)"moin3",
+                                                  5);
+                    unsigned char frame5[128];
+                    size_t flen5 = kiss_encode(frame5, sizeof frame5, 0,
+                                               KISS_CMD_DATA, ui5, uilen5);
+                    CHECK(uilen5 > 0 && flen5 > 0);
+                    usleep(300000);
+                    size_t rlen = 0;
+                    unsigned char *rec = read_record(recpath, &rlen);
+                    CHECK(rec != NULL && memfind(rec, rlen,
+                                                 (const char *)frame5,
+                                                 flen5) != NULL);
+
+                    pr_msg log[16];
+                    size_t nlog = 0;
+                    CHECK(pr_log_tail(&cfg, log, 16, &nlog,
+                                      err, sizeof err) == 0);
+                    bool seen = false;
+                    for (size_t i = 0; i < nlog; i++)
+                        if (log[i].kind == PR_MSG_TX &&
+                            strcmp(log[i].from, label) == 0 &&
+                            strcmp(log[i].text, "moin3") == 0)
+                            seen = true;
+                    CHECK(seen);
                 }
 
                 pr_msg old[8];

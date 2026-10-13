@@ -474,6 +474,27 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
     }
 
     /*
+     * A source like "CALL@device" names the transmitting device for
+     * the message log - the MailboxD beacon sends once per station and
+     * the browser shows which one carried it.  AX.25 addresses have no
+     * "@", so the frame goes out with the base call while the log
+     * entry keeps the label.
+     */
+    char call[PR_CALLSIGN_MAX];
+    {
+        const char *at = strchr(from, '@');
+        if (at != NULL && at != from) {
+            size_t clen = (size_t)(at - from);
+            if (clen >= sizeof call)
+                clen = sizeof call - 1;
+            memcpy(call, from, clen);
+            call[clen] = '\0';
+        } else {
+            pr_strlcpy(call, from, sizeof call);
+        }
+    }
+
+    /*
      * Build an AX.25 UI frame. "to" is the station to call; empty or
      * CQ stands for a broadcast without a fixed partner.
      */
@@ -481,7 +502,7 @@ static int tnc2_send(pr_rig *r, const char *from, const char *to,
         to = "CQ";
 
     unsigned char ui[512];
-    size_t uilen = ax25_ui_frame(ui, sizeof ui, from, to,
+    size_t uilen = ax25_ui_frame(ui, sizeof ui, call, to,
                                  (const unsigned char *)text, strlen(text));
     if (uilen == 0) {
         pr_trf(err, errlen, "frame could not be built");

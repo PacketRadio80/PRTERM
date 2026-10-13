@@ -1115,7 +1115,13 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
                 return 0;
             }
             char err[256];
-            if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
+            /* callerid@station for the message log - the browser shows
+             * which device transmitted.  The driver cuts the @device
+             * suffix off, the AX.25 frame carries plain callerid. */
+            char cid_sta[80];
+            snprintf(cid_sta, sizeof cid_sta, "%s@%s", cid,
+                     sta ? sta->name : "default");
+            if (app_tx(&a, cid_sta, "CQ", msg, &sess, err, sizeof err) == 0) {
                 txf = fopen(txpath, "w");
                 if (txf) { fprintf(txf, "%lld\n", now); fclose(txf); }
                 json_ok(res);

@@ -1669,7 +1669,13 @@ int pr_handle(pr_request *req, pr_response *res, pr_config *cfg)
             }
 
             char err[256];
-            if (app_tx(&a, cid, "CQ", msg, &sess, err, sizeof err) == 0) {
+            /* Compose callerid@station for the message log so the
+             * browser shows which device transmitted.  The AX.25
+             * frame still carries plain callerid (cid) - the driver
+             * cuts the @device suffix off for the frame. */
+            char cid_sta[80];
+            snprintf(cid_sta, sizeof cid_sta, "%s@%s", cid, station->name);
+            if (app_tx(&a, cid_sta, "CQ", msg, &sess, err, sizeof err) == 0) {
                 /* Record per-station TX timestamp. */
                 txf = fopen(txpath, "w");
                 if (txf) { fprintf(txf, "%lld\n", now); fclose(txf); }
