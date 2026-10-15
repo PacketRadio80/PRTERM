@@ -119,7 +119,7 @@ Each `[station:NAME]` defines one complete station: own TNC, own radio, own ante
 | `radio_baud` | `1200` | On-air data rate (HARDWARE, not changeable) |
 | `modem` | *(empty)* | Modem type (e.g. "tcm3105") |
 | `line` | `8n1` | `8n1\|7e1\|7o1\|8e1\|8o1` |
-| `kiss_init` | `esc` | KISS entry: `esc` (TNC2C), `auto` (PK-TNC2), `tapr` (TAPR) |
+| `kiss_init` | `esc` | KISS entry: `esc` (TNC2C), `auto` (PK-TNC2), `tapr` (TAPR), `native` (BayCom/PTY, T-Modem) |
 | `mode` | *(empty)* | `fm\|am\|ssb`; empty = inherit `[radio]` mode |
 | `freq_hz` | `0` | Frequency in Hz; 0 = inherit `[radio]` freq_hz |
 | `callerid` | *(inherits)* | Station callsign (inherits `[station]` if empty) |
@@ -130,3 +130,4 @@ Each `[station:NAME]` defines one complete station: own TNC, own radio, own ante
 - `esc` — `ESC @K` without `\r` (Landolt TNC2C, TheFirmware)
 - `auto` — `ESC @K`, repeated when firmware only echoes "kiss on" (PK-TNC2, TheFirmware class)
 - `tapr` — `"kiss on\r"` (real TAPR devices only)
+- `native` — device already speaks KISS from power-up: the daemon opens the port and writes nothing. Used for the BayCom PTY and the T-Modem-c1224 / s1224 (received frames arrive without FCS there — the firmware strips the trailer itself).

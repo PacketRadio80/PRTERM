@@ -37,7 +37,7 @@ option(PRTERM_BUILD_TOOLS   "Build shell helper tools"           ON)
 
 set(PRTERM_RIG_SIM     ON  CACHE BOOL "Build the simulated rig (no hardware)")
 set(PRTERM_RIG_TNC2    ON  CACHE BOOL "Build the TNC2-class driver (Landolt TNC2C, PK-TNC2)")
-set(PRTERM_RIG_TMODEM  OFF CACHE BOOL "Build the T-Modem half-TNC driver")
+set(PRTERM_RIG_TMODEM  ON  CACHE BOOL "Build the T-Modem half-TNC driver (c1224 / s1224)")
 
 # ---------------------------------------------------------------------------
 # Compiler settings
@@ -320,6 +320,19 @@ if(BUILD_TESTING)
     add_dependencies(test_tncd prterm-tncd)
     add_test(NAME tncd COMMAND test_tncd $<TARGET_FILE:prterm-tncd>)
     set_tests_properties(tncd PROPERTIES TIMEOUT 120)
+
+    # Integration: prterm-tncd + tmodem driver against a FAKE T-Modem
+    # (c1224/s1224 class) on a pseudo terminal. No hardware, no RF.
+    # Checks the native-KISS contract: the daemon writes NOTHING at
+    # startup, the firmware delivers RX frames WITHOUT FCS.
+    if(PRTERM_RIG_TMODEM)
+        add_executable(test_tmodem tests/test_tmodem.c)
+        target_link_libraries(test_tmodem PRIVATE prterm_core)
+        target_compile_options(test_tmodem PRIVATE ${PRTERM_WARN_FLAGS})
+        add_dependencies(test_tmodem prterm-tncd)
+        add_test(NAME tmodem COMMAND test_tmodem $<TARGET_FILE:prterm-tncd>)
+        set_tests_properties(tmodem PROPERTIES TIMEOUT 120)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

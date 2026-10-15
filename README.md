@@ -251,9 +251,17 @@ Print it yourself with `./prterm.cgi --channels`.
 | `sim` | — | simulation | works |
 | `tnc2` | Landolt TNC2C, PK-TNC2 (TNC2 clones) | KISS + ESC host mode | in use |
 | `tnc2` (`kiss_init=native`) | BayCom/Compa/PC-COM SER12 modem via `prterm-baycom` | KISS over a PTY | in use |
-| `tmodem` | T-Modem (half-TNC) | ESC host frames | planned |
+| `tmodem` | T-Modem-c1224 / s1224 (Pico USB KISS half-TNC) | KISS over USB CDC (`kiss_init=native`) | in use |
 
 Connected via a serial port or a USB-SERIAL converter.
+
+The **T-Modem** is a half-TNC on a Raspberry Pi Pico: HDLC + KISS in the
+firmware, AFSK either on a TCM3105-class chip (c1224) or in software
+(s1224). It is in KISS mode from power-up, so the station runs with
+`kiss_init = native` — `prterm-tncd` opens the port and writes nothing at
+startup. Unlike the TNC2 class, received frames arrive **without FCS**
+(the firmware validates and strips the trailer itself); the `tmodem`
+driver accounts for that.
 
 | OS | Classic TNCs | T-Modem |
 |---|---|---|
@@ -521,11 +529,10 @@ Also planned:
 - **Baycom** — studied first, then built into PRTERM
 - **ARDOP** — external plugin that talks to ARDOP software; no integration
 - interconnection between MailboxD instances
-- T-Modem driver (`PRTERM_RIG_TMODEM` switch exists, source not yet)
-- band tables per country / region in `[bands]`
+- band tables per country /region in `[bands]`
 - channel raster validation and per-band power limits
 - mandatory identification (transmitting the call sign)
-- an own TNC on Raspberry Pi & Co., taking the slot `tmodem` holds until then
+- an own TNC on Raspberry Pi & Co. (the `tmodem` slot is filled by the T-Modem-c1224 / s1224 driver; other soft-TNCs may reuse it)
 
 ---
 
